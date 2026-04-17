@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  restate:
+    image: restatedev/restate:latest
+    container_name: restate-server
+    ports:
+      - "8080:8080"   # Admin API
+      - "9070:9070"   # Ingress
+    environment:
+      - RUST_LOG=info
+    volumes:
+      - restate-data:/restate-data
+
+volumes:
+  restate-data:
