@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package org.example
 
 import dev.restate.sdk.http.vertx.RestateHttpEndpointBuilder
@@ -8,8 +10,6 @@ import org.example.workflow.LoanApplicationWorkflow
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
 
 @SpringBootApplication
 class LoanApplication
@@ -32,28 +32,4 @@ fun main(args: Array<String>) {
     // Start Spring Boot application
     logger.info("Starting Spring Boot application...")
     runApplication<LoanApplication>(*args)
-}
-
-@Configuration
-class RestateConfig {
-
-    @Bean
-    fun loanApplicationWorkflow(): LoanApplicationWorkflow {
-        return LoanApplicationWorkflow()
-    }
-
-    @Bean
-    fun creditCheckService(): CreditCheckService {
-        return CreditCheckService()
-    }
-
-    @Bean
-    fun decisionService(): DecisionService {
-        return DecisionService()
-    }
-
-    @Bean
-    fun contractGenerationService(): ContractGenerationService {
-        return ContractGenerationService()
-    }
 }

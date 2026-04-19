@@ -1,0 +1,58 @@
+@startuml loan-workflow-simple
+title Loan Application - Simplified State Diagram
+
+hide empty description
+
+[*] --> NEW : Submit
+
+state NEW {
+  state "New Application" as new_app
+}
+
+state CREDIT_CHECK {
+  state "Checking Credit" as checking
+  checking : Score: 300-850
+}
+
+state DECISION {
+  state "Making Decision" as deciding
+}
+
+state APPROVED {
+  state "Approved ✓" as approved #LightGreen
+  approved : Contract Generated
+}
+
+state REJECTED {
+  state "Rejected ✗" as rejected #LightCoral
+}
+
+state MANUAL_REVIEW {
+  state "Manual Review ⏳" as review #LightYellow
+}
+
+NEW --> CREDIT_CHECK : Start Processing
+CREDIT_CHECK --> CREDIT_CHECK : Retry (if failed)
+CREDIT_CHECK --> DECISION : Score Retrieved
+
+DECISION --> APPROVED : Score ≥ 750
+DECISION --> MANUAL_REVIEW : 600 ≤ Score < 680
+DECISION --> REJECTED : Otherwise
+
+APPROVED --> [*]
+REJECTED --> [*]
+MANUAL_REVIEW --> [*]
+
+note right of CREDIT_CHECK
+  Automatic retries
+  via Restate
+end note
+
+note right of DECISION
+  Business Rules:
+  • HIGH (≥750) → Approve
+  • BORDERLINE (600-679) → Review
+  • LOW (<600 or 680-749) → Reject
+end note
+
+@enduml
