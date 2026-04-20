@@ -21,13 +21,17 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
+    // Kotlin Coroutines support for Spring
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+
     // Restate SDK
-    implementation("dev.restate:sdk-api-kotlin-gen:2.4.1") {
+    implementation("dev.restate:sdk-api-kotlin-gen:2.5.0") {
         exclude(group = "org.slf4j", module = "slf4j-nop")
     }
-    ksp("dev.restate:sdk-api-kotlin-gen:2.4.1")
+    ksp("dev.restate:sdk-api-kotlin-gen:2.5.0")
 
-    implementation("dev.restate:sdk-kotlin-http:2.4.1") {
+    implementation("dev.restate:sdk-kotlin-http:2.5.0") {
         exclude(group = "org.slf4j", module = "slf4j-nop")
     }
 

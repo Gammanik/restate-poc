@@ -5,10 +5,12 @@ services:
     image: restatedev/restate:latest
     container_name: restate-server
     ports:
-      - "8080:8080"   # Admin API
-      - "9070:9070"   # Ingress
+      - "8080:8080"   # Ingress API
+      - "9070:9070"   # Admin API + Web UI
     environment:
       - RUST_LOG=info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - restate-data:/restate-data
 
