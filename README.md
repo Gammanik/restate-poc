@@ -1,136 +1,102 @@
-# Restate Loan Application POC
+# Restate vs Temporal POC
 
-Durable workflow execution with Restate, Kotlin, and Spring Boot.
+Side-by-side comparison of Restate and Temporal implementing the same UAE credit origination workflow.
 
-**Features:** Durable execution • Automatic retries • Service orchestration • Complete audit trails
+## What This Shows
 
-## Workflow State Machine
+**Same 7-stage workflow, two engines:** AECB bureau check, Open Banking, consent capture, decisioning, and manual underwriting — all executed identically via hexagonal architecture with swappable adapters.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Submitted: Submit Application
+## Architecture
 
-    Submitted --> CreditCheck: Start Processing
-
-    CreditCheck --> CreditCheck: Retry (30% failure)
-    CreditCheck --> Decision: Score Retrieved
-
-    Decision --> Contract: Score ≥ 750
-    Decision --> ManualReview: 600 ≤ Score < 680
-    Decision --> Rejected: Otherwise
-
-    Contract --> Approved: Contract Created
-
-    Approved --> [*]
-    Rejected --> [*]
-    ManualReview --> [*]
-
-    note right of CreditCheck
-        Automatic retries
-        handled by Restate
-    end note
-
-    note right of Decision
-        Rules:
-        • HIGH (≥750) → APPROVED
-        • BORDERLINE (600-679) → MANUAL_REVIEW
-        • LOW → REJECTED
-    end note
+```
+┌─────────────┐
+│ LOS Service │ ← Hexagonal core (domain + ports)
+└──────┬──────┘
+       │ WorkflowOrchestrator port
+    ┌──┴──┐
+    │     │
+┌───▼──┐ ┌▼────────┐
+│Restate│ │Temporal│ ← Adapters (swappable)
+└───┬───┘ └─────┬──┘
+    │           │
+┌───▼───────────▼─────┐
+│  httpbin-proxy      │ ← Simulates AECB, Open Banking, Decision Engine
+└─────────────────────┘
 ```
 
 ## Quick Start
 
 ```bash
-# Start Restate
-docker-compose up -d
+# 1. Infrastructure
+docker compose up -d
 
-# Build and run application
-./gradlew build && ./gradlew bootRun
+# 2. Services (in separate terminals)
+./gradlew :httpbin-proxy:bootRun
+./gradlew :restate-impl:run
+WORKFLOW_ENGINE=restate ./gradlew :los-service:bootRun
+
+# 3. Demo
+./demo-script.sh happy-path
 ```
 
-In a new terminal:
-```bash
-# Register services
-curl -X POST http://localhost:9070/deployments \
-  -H 'Content-Type: application/json' \
-  -d '{"uri":"http://host.docker.internal:9080","use_http_11":true}'
+**UIs:**
+- Restate: http://localhost:9070
+- Temporal: http://localhost:8088
 
-# Test workflow
-curl -X POST http://localhost:8081/api/checkCredit \
-  -H 'Content-Type: application/json' \
-  -d '{"applicantName":"John Doe","amount":50000,"income":100000}'
-```
+## Product Configurations
 
-**Web UI:** http://localhost:9070/ui/
+Three loan products with different workflows:
 
-![Restate UI](docs/ui/restate-ui-overview.png)
+| Product | AECB | Open Banking | Auto-Approve Score | SLA Days |
+|---------|------|--------------|-------------------|----------|
+| Personal Loan | ✓ | ✓ | 700 | 7 |
+| Auto Loan | ✓ | ✗ | 650 | 5 |
+| Mortgage | ✓ | ✓ | 750 | 14 |
 
-## Sequence Diagram
+Config: `los-service/src/main/resources/product-configs.yaml`
 
-```mermaid
-sequenceDiagram
-    Client->>API: POST /api/checkCredit
-    API->>Restate: Start Workflow
-    Restate->>Credit: checkCredit()
-    Note over Restate,Credit: Auto-retry on failure (30%)
-    Credit-->>Restate: Score: 780
-    Restate->>Decision: makeDecision(780)
-    Decision-->>Restate: APPROVED
-    Restate->>Contract: generateContract()
-    Contract-->>Restate: Contract ID
-    Restate-->>API: Result
-    API-->>Client: Approved + Contract
-```
+## Comparison
 
-## Decision Rules
+| Aspect | Restate | Temporal |
+|--------|---------|----------|
+| Deployment | Single binary (port 9080) | Server cluster + workers |
+| State visibility | Full journal in UI | Event history in UI |
+| Retry | Per ctx.run(), inline config | Per activity, ActivityOptions |
+| Human-in-loop | Awakeables (WIP) | Signals + Workflow.await |
+| Determinism | No constraints | Strict (Workflow.currentTimeMillis) |
+| Versioning | None (v1.x) | getVersion() for safe rollouts |
 
-| Score | Decision | Income/Loan Ratio |
-|-------|----------|-------------------|
-| 750-850 | ✅ APPROVED | ≥ 5.0 |
-| 680-749 | ❌ REJECTED | 3.0-4.9 |
-| 600-679 | ⏳ MANUAL_REVIEW | 2.0-2.9 |
-| < 600 | ❌ REJECTED | < 2.0 |
+**Key difference:** Restate treats workflows as durable functions with automatic journaling. Temporal separates workflow (orchestration) from activities (side effects) with strict replay semantics.
 
-## Architecture
+## Project Structure
 
 ```
-Client → Spring Boot API (8081) → Restate Server (8080/9070) ← Services (9080)
-                                                                  • CreditCheck
-                                                                  • Decision
-                                                                  • Contract
-                                                                  • Workflow
+├── common/                  # Domain + DTOs (pure Java)
+├── los-service/             # Spring Boot gateway + FSM
+│   ├── application/port/    # WorkflowOrchestrator interface
+│   └── adapter/             # Restate + Temporal adapters
+├── restate-impl/            # Restate workflow
+├── temporal-impl/           # Temporal workflow + activities
+└── httpbin-proxy/           # External service simulator
 ```
 
-**Components:**
-- **LoanApplicationWorkflow** - Virtual Object (stateful)
-- **CreditCheckService** - Stateless (30% simulated failures)
-- **DecisionService** - Business rules
-- **ContractGenerationService** - Document generation
+## Key Files
 
-## Monitoring
+- **Domain FSM:** `common/src/main/java/com/mal/lospoc/common/domain/ApplicationState.java`
+- **Workflow (Restate):** `restate-impl/src/main/java/com/mal/lospoc/restate/workflow/CreditCheckWorkflow.java`
+- **Workflow (Temporal):** `temporal-impl/src/main/java/com/mal/lospoc/temporal/workflow/CreditCheckWorkflowImpl.java`
+- **Adapter Switching:** `los-service/src/main/resources/application.yaml` (`WORKFLOW_ENGINE` env var)
 
-- **Web UI**: http://localhost:9070/ui/
-- **Services**: `curl http://localhost:9070/services`
-- **Invocations**: `curl http://localhost:9070/invocations`
+## Stack
+
+Java 21, Spring Boot 3.4, Restate SDK 2.0, Temporal SDK 1.26, Docker Compose
+
+## UAE Context
+
+- **AECB:** Al Etihad Credit Bureau (national credit scoring)
+- **Open Banking:** UAE Central Bank Open Finance framework
+- **PDPL:** Personal Data Protection Law (consent requirement)
 
 ---
 
-## Tech Stack
-
-**Stack:** Kotlin 2.1.0 • Spring Boot 3.4.1 • Restate SDK 2.5.0
-
-**Ports:**
-- `8080` - Restate Ingress
-- `9070` - Admin + Web UI
-- `9080` - Services Endpoint
-- `8081` - REST API
-
-**Structure:**
-```
-src/main/kotlin/org/example/
-├── model/              # Data models
-├── service/            # Credit, Decision, Contract services
-├── workflow/           # LoanApplicationWorkflow (Virtual Object)
-├── controller/         # REST API
-└── LoanApplication.kt  # Main entry point
-```
+Built for engineering debrief: Ashish (EM) & Vitaliy (Senior Eng). Focus on architecture patterns, not production readiness.

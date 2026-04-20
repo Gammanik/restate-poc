@@ -1,0 +1,17 @@
+server:
+  port: 8000
+
+spring:
+  application:
+    name: los-service
+
+workflow:
+  engine: ${WORKFLOW_ENGINE:restate}
+  restate:
+    url: ${RESTATE_URL:http://localhost:8080}
+  temporal:
+    url: ${TEMPORAL_URL:localhost:7233}
+
+logging:
+  level:
+    com.mal.lospoc: INFO

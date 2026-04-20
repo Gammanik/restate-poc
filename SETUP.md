@@ -2,140 +2,139 @@
 
 ## Prerequisites
 
-- Java 23
-- Docker
-- curl (for testing)
+- Java 21
+- Docker & Docker Compose
+- Gradle 8+ (or use `./gradlew`)
 
-## Start Services
-
-### Option 1: Docker Compose (Recommended)
+## Build
 
 ```bash
-# Start Restate server
-docker-compose up -d
-
-# Check status
-docker-compose ps
-```
-
-### Option 2: Manual Docker
-
-```bash
-docker run --name restate_dev --rm -d \
-  -p 8080:8080 -p 9070:9070 \
-  --add-host=host.docker.internal:host-gateway \
-  restatedev/restate:latest
-```
-
-## Build and Run Application
-
-```bash
-# Build
 ./gradlew build
-
-# Run
-./gradlew bootRun
 ```
 
-Wait for: `Started LoanApplicationKt in X.XXX seconds`
+## Run Locally
 
-## Register Services
+### Option 1: Restate Setup
 
 ```bash
+# Terminal 1: Infrastructure
+docker compose up -d restate
+
+# Terminal 2: httpbin-proxy
+./gradlew :httpbin-proxy:bootRun
+
+# Terminal 3: Restate service
+./gradlew :restate-impl:run
+
+# Terminal 4: LOS service (Restate mode)
+WORKFLOW_ENGINE=restate ./gradlew :los-service:bootRun
+
+# Terminal 5: Register Restate service
 curl -X POST http://localhost:9070/deployments \
   -H 'Content-Type: application/json' \
   -d '{"uri":"http://host.docker.internal:9080","use_http_11":true}'
+
+# Terminal 6: Test
+./demo-script.sh happy-path
 ```
 
-Expected output:
-```json
-{
-  "id": "dp_...",
-  "services": [
-    {"name": "CreditCheckService", ...},
-    {"name": "DecisionService", ...},
-    {"name": "ContractGenerationService", ...},
-    {"name": "LoanApplicationWorkflow", ...}
-  ]
-}
-```
-
-Verify:
-```bash
-curl http://localhost:9070/services | jq '.services[] | .name'
-```
-
-## Test
+### Option 2: Temporal Setup
 
 ```bash
-curl -X POST http://localhost:8081/api/checkCredit \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "applicantName": "John Doe",
-    "amount": 50000,
-    "income": 100000
-  }'
+# Terminal 1: Infrastructure
+docker compose up -d postgres temporal temporal-ui
+
+# Terminal 2: httpbin-proxy
+./gradlew :httpbin-proxy:bootRun
+
+# Terminal 3: Temporal worker
+./gradlew :temporal-impl:run
+
+# Terminal 4: LOS service (Temporal mode)
+WORKFLOW_ENGINE=temporal ./gradlew :los-service:bootRun
+
+# Terminal 5: Test
+./demo-script.sh happy-path
+```
+
+## Verify
+
+### Restate
+- UI: http://localhost:9070
+- Admin API: `curl http://localhost:9070/services`
+
+### Temporal
+- UI: http://localhost:8088
+- gRPC: localhost:7233
+
+### LOS Service
+- REST API: http://localhost:8000
+- Health: `curl http://localhost:8000/api/applications/{id}`
+
+### httpbin-proxy
+- Status: `curl http://localhost:8090/config/status`
+
+## Ports
+
+| Service | Port | Protocol |
+|---------|------|----------|
+| Restate Ingress | 8080 | HTTP |
+| Restate Admin | 9070 | HTTP |
+| Restate Service | 9080 | HTTP |
+| Temporal Server | 7233 | gRPC |
+| Temporal UI | 8088 | HTTP |
+| PostgreSQL | 5432 | TCP |
+| LOS Service | 8000 | HTTP |
+| httpbin-proxy | 8090 | HTTP |
+
+## Configuration
+
+### Switch Workflow Engine
+Edit `los-service/src/main/resources/application.yaml` or set env var:
+```bash
+WORKFLOW_ENGINE=restate  # or temporal
+```
+
+### Product Configs
+Edit `los-service/src/main/resources/product-configs.yaml` to change:
+- Timeouts per stage
+- Retry counts
+- Auto-approve/reject thresholds
+- Underwriting SLA
+
+### Failure Simulation
+```bash
+# Increase AECB failure rate to 50%
+curl -X PUT "http://localhost:8090/config/failure-rate/aecb?rate=0.5"
 ```
 
 ## Troubleshooting
 
-**Port already in use:**
+### Restate service not discoverable
 ```bash
-# Kill existing process
-lsof -i :9080 | grep LISTEN
-kill <PID>
-
-# Or restart from scratch
-docker-compose down -v
-docker-compose up -d
-pkill -f bootRun
-./gradlew bootRun
-```
-
-**Service not found:**
-```bash
-# Check services are registered
-curl http://localhost:9070/services
-
-# Re-register if needed
+# Register manually
 curl -X POST http://localhost:9070/deployments \
   -H 'Content-Type: application/json' \
   -d '{"uri":"http://host.docker.internal:9080","use_http_11":true}'
 ```
 
-**Restate not responding:**
+### Temporal worker not connecting
+Check Temporal server is up:
 ```bash
-# Check Docker container
-docker ps | grep restate
-docker logs restate-server
-
-# Restart
-docker-compose restart
+docker compose ps temporal
+docker compose logs temporal
 ```
 
-## Stopping
-
+### LOS service returns 500
+Check which orchestrator is active:
 ```bash
-# Stop application
-Ctrl+C
-
-# Stop Restate
-docker-compose down
-
-# Clean volumes (removes all data)
-docker-compose down -v
+# Logs will show which adapter loaded
+./gradlew :los-service:bootRun | grep "WorkflowOrchestrator"
 ```
 
-## Monitoring
+## Clean Build
 
-- **Web UI**: http://localhost:9070/ui/
-- **Health**: `curl http://localhost:9070/health`
-- **Services**: `curl http://localhost:9070/services`
-- **Invocations**: `curl http://localhost:9070/invocations`
-
-## Ports
-
-- `8080` - Restate Ingress API
-- `9070` - Restate Admin API + Web UI
-- `9080` - Application Services Endpoint
-- `8081` - Spring Boot REST API
+```bash
+./gradlew clean build
+docker compose down -v  # Remove volumes
+```
