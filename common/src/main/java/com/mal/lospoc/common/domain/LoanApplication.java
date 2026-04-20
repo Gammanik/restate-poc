@@ -18,7 +18,7 @@ public record LoanApplication(
             productId,
             userDetails,
             loanAmount,
-            new ApplicationState.Initiated()
+            new ApplicationState.Submitted()
         );
     }
 

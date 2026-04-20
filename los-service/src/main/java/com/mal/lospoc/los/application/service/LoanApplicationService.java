@@ -3,10 +3,8 @@ package com.mal.lospoc.los.application.service;
 import com.mal.lospoc.common.domain.ApplicationEvent;
 import com.mal.lospoc.common.domain.ApplicationState;
 import com.mal.lospoc.common.domain.LoanApplication;
-import com.mal.lospoc.common.dto.RiskScore;
 import com.mal.lospoc.common.dto.UserDetails;
 import com.mal.lospoc.los.application.config.ProductConfigLoader;
-import com.mal.lospoc.los.application.port.WorkflowOrchestrator;
 import com.mal.lospoc.los.infrastructure.InMemoryApplicationStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,94 +20,73 @@ public class LoanApplicationService {
 
     private final InMemoryApplicationStore store;
     private final ProductConfigLoader configLoader;
-    private final WorkflowOrchestrator orchestrator;
 
-    public LoanApplicationService(
-        InMemoryApplicationStore store,
-        ProductConfigLoader configLoader,
-        WorkflowOrchestrator orchestrator
-    ) {
+    public LoanApplicationService(InMemoryApplicationStore store, ProductConfigLoader configLoader) {
         this.store = store;
         this.configLoader = configLoader;
-        this.orchestrator = orchestrator;
     }
 
-    public UUID submitApplication(String productId, UserDetails userDetails, BigDecimal loanAmount) {
-        configLoader.getConfig(productId); // Validate product exists
+    public UUID submit(String productId, UserDetails userDetails, BigDecimal loanAmount) {
+        configLoader.getConfig(productId); // Validate
 
-        LoanApplication application = LoanApplication.initiate(productId, userDetails, loanAmount);
-        store.save(application);
-        store.appendEvent(application.applicationId(), new ApplicationEvent.ApplicationInitiated(productId));
+        LoanApplication app = LoanApplication.initiate(productId, userDetails, loanAmount);
+        store.save(app);
+        store.appendEvent(app.applicationId(), new ApplicationEvent.Started(productId));
 
-        log.info("Application submitted: {}", application.applicationId());
-
-        orchestrator.startCreditCheck(application.applicationId(), productId);
-
-        return application.applicationId();
+        log.info("Application submitted: {}", app.applicationId());
+        return app.applicationId();
     }
 
-    public void applyEvent(UUID applicationId, ApplicationEvent event) {
-        LoanApplication app = store.findById(applicationId)
-            .orElseThrow(() -> new IllegalArgumentException("Application not found: " + applicationId));
+    public void applyEvent(UUID appId, ApplicationEvent event) {
+        LoanApplication app = store.findById(appId)
+            .orElseThrow(() -> new IllegalArgumentException("App not found: " + appId));
 
-        ApplicationState newState = transition(app.state(), event);
-        store.save(app.withState(newState));
-        store.appendEvent(applicationId, event);
-
-        log.info("Event applied to {}: {} -> {}", applicationId, event.getClass().getSimpleName(), newState.getClass().getSimpleName());
-    }
-
-    private ApplicationState transition(ApplicationState current, ApplicationEvent event) {
-        return switch (current) {
-            case ApplicationState.Initiated i -> switch (event) {
-                case ApplicationEvent.UserDetailsCollected e -> new ApplicationState.CollectingUserDetails();
-                default -> throw invalidTransition(current, event);
+        ApplicationState newState = switch (app.state()) {
+            case ApplicationState.Submitted s -> switch (event) {
+                case ApplicationEvent.Started e -> new ApplicationState.Processing("consent");
+                default -> throw invalid(app.state(), event);
             };
-            case ApplicationState.CollectingUserDetails c -> switch (event) {
-                case ApplicationEvent.ConsentCaptured e -> new ApplicationState.AwaitingConsent();
-                default -> throw invalidTransition(current, event);
-            };
-            case ApplicationState.AwaitingConsent a -> switch (event) {
-                case ApplicationEvent.AecbFetched e -> new ApplicationState.FetchingAecb();
-                default -> throw invalidTransition(current, event);
-            };
-            case ApplicationState.FetchingAecb f -> switch (event) {
-                case ApplicationEvent.OpenBankingFetched e -> new ApplicationState.FetchingOpenBanking();
-                case ApplicationEvent.DecisionMade e -> new ApplicationState.Decisioning();
-                default -> throw invalidTransition(current, event);
-            };
-            case ApplicationState.FetchingOpenBanking o -> switch (event) {
-                case ApplicationEvent.DecisionMade e -> new ApplicationState.Decisioning();
-                default -> throw invalidTransition(current, event);
-            };
-            case ApplicationState.Decisioning d -> switch (event) {
-                case ApplicationEvent.DecisionMade e when e.score().outcome() == RiskScore.Outcome.MANUAL ->
-                    new ApplicationState.Underwriting(Instant.now(), "pending");
-                case ApplicationEvent.DecisionMade e when e.score().outcome() == RiskScore.Outcome.AUTO_APPROVE ->
+            case ApplicationState.Processing p -> switch (event) {
+                case ApplicationEvent.StageCompleted e -> new ApplicationState.Processing(nextStage(e.stage()));
+                case ApplicationEvent.DecisionMade e when e.score().outcome() == com.mal.lospoc.common.dto.RiskScore.Outcome.MANUAL ->
+                    new ApplicationState.ManualReview(Instant.now());
+                case ApplicationEvent.DecisionMade e when e.score().outcome() == com.mal.lospoc.common.dto.RiskScore.Outcome.AUTO_APPROVE ->
                     new ApplicationState.Approved(e.score().score(), Instant.now());
-                case ApplicationEvent.DecisionMade e when e.score().outcome() == RiskScore.Outcome.AUTO_REJECT ->
+                case ApplicationEvent.DecisionMade e ->
                     new ApplicationState.Rejected("Score too low", Instant.now());
-                default -> throw invalidTransition(current, event);
+                default -> throw invalid(app.state(), event);
             };
-            case ApplicationState.Underwriting u -> switch (event) {
-                case ApplicationEvent.UnderwritingCompleted e when e.decision().approved() ->
+            case ApplicationState.ManualReview m -> switch (event) {
+                case ApplicationEvent.Completed e when e.approved() ->
                     new ApplicationState.Approved(0, Instant.now());
-                case ApplicationEvent.UnderwritingCompleted e when !e.decision().approved() ->
-                    new ApplicationState.Rejected(e.decision().rejectionReason(), Instant.now());
-                default -> throw invalidTransition(current, event);
+                case ApplicationEvent.Completed e ->
+                    new ApplicationState.Rejected(e.reason(), Instant.now());
+                default -> throw invalid(app.state(), event);
             };
-            case ApplicationState.Approved ap -> current;
-            case ApplicationState.Rejected r -> current;
-            case ApplicationState.Cancelled c -> current;
+            case ApplicationState.Approved a -> app.state();
+            case ApplicationState.Rejected r -> app.state();
+        };
+
+        store.save(app.withState(newState));
+        store.appendEvent(appId, event);
+
+        log.info("Event applied: {} -> {}", event.getClass().getSimpleName(), newState.getClass().getSimpleName());
+    }
+
+    private String nextStage(String current) {
+        return switch (current) {
+            case "consent" -> "aecb";
+            case "aecb" -> "open_banking";
+            case "open_banking" -> "decisioning";
+            default -> "decisioning";
         };
     }
 
-    private IllegalStateException invalidTransition(ApplicationState state, ApplicationEvent event) {
-        return new IllegalStateException("Invalid transition: " + state.getClass().getSimpleName() + " + " + event.getClass().getSimpleName());
+    private IllegalStateException invalid(ApplicationState state, ApplicationEvent event) {
+        return new IllegalStateException("Invalid: " + state.getClass().getSimpleName() + " + " + event.getClass().getSimpleName());
     }
 
-    public LoanApplication getApplication(UUID applicationId) {
-        return store.findById(applicationId)
-            .orElseThrow(() -> new IllegalArgumentException("Application not found: " + applicationId));
+    public LoanApplication get(UUID appId) {
+        return store.findById(appId).orElseThrow(() -> new IllegalArgumentException("Not found: " + appId));
     }
 }

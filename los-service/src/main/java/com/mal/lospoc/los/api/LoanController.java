@@ -19,27 +19,16 @@ public class LoanController {
         this.service = service;
     }
 
-    @PostMapping("/credit-check")
-    public ResponseEntity<Map<String, Object>> submitApplication(@RequestBody SubmitRequest request) {
-        UUID applicationId = service.submitApplication(
-            request.productId(),
-            request.userDetails(),
-            request.loanAmount()
-        );
-        return ResponseEntity.ok(Map.of(
-            "applicationId", applicationId.toString(),
-            "status", "submitted"
-        ));
+    @PostMapping("/applications")
+    public ResponseEntity<Map<String, Object>> submit(@RequestBody SubmitRequest req) {
+        UUID appId = service.submit(req.productId(), req.userDetails(), req.loanAmount());
+        return ResponseEntity.ok(Map.of("applicationId", appId.toString(), "status", "submitted"));
     }
 
     @GetMapping("/applications/{id}")
-    public ResponseEntity<LoanApplication> getApplication(@PathVariable("id") UUID applicationId) {
-        return ResponseEntity.ok(service.getApplication(applicationId));
+    public ResponseEntity<LoanApplication> get(@PathVariable UUID id) {
+        return ResponseEntity.ok(service.get(id));
     }
 
-    public record SubmitRequest(
-        String productId,
-        UserDetails userDetails,
-        BigDecimal loanAmount
-    ) {}
+    record SubmitRequest(String productId, UserDetails userDetails, BigDecimal loanAmount) {}
 }

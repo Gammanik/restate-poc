@@ -5,6 +5,5 @@ include(
     "los-service",
     "restate-impl",
     "temporal-impl",
-    "httpbin-proxy",
-    "stress-test"
+    "httpbin-proxy"
 )

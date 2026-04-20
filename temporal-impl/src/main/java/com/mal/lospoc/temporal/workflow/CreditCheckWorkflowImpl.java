@@ -1,8 +1,10 @@
 package com.mal.lospoc.temporal.workflow;
 
+import com.mal.lospoc.common.client.WorkflowClient;
+import com.mal.lospoc.common.domain.ApplicationEvent;
 import com.mal.lospoc.common.domain.LoanProductConfig;
 import com.mal.lospoc.common.dto.*;
-import com.mal.lospoc.temporal.activities.CreditCheckActivities;
+import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.workflow.Workflow;
 import org.slf4j.Logger;
@@ -13,58 +15,72 @@ import java.util.UUID;
 public class CreditCheckWorkflowImpl implements CreditCheckWorkflow {
     private static final Logger log = Workflow.getLogger(CreditCheckWorkflowImpl.class);
 
-    private final CreditCheckActivities activities = Workflow.newActivityStub(
-        CreditCheckActivities.class,
+    private final Activities activities = Workflow.newActivityStub(
+        Activities.class,
         ActivityOptions.newBuilder()
             .setStartToCloseTimeout(Duration.ofSeconds(30))
             .build()
     );
 
-    private UnderwritingDecision pendingDecision = null;
-
     @Override
-    public void run(CreditCheckRequest request) {
-        UUID appId = request.applicationId();
-        String productId = request.productId();
-        LoanProductConfig config = request.productConfig();
+    public void run(CreditCheckRequest req) {
+        UUID appId = req.applicationId();
+        LoanProductConfig config = req.productConfig();
 
-        log.info("Starting Temporal credit check workflow for application: {}", appId);
+        log.info("[Temporal] Starting workflow for {}", appId);
 
-        // Stage 1: User details collection
-        activities.collectUserDetails(appId, request.userDetails());
+        ConsentRecord consent = activities.consent(appId, req.httpbinUrl(), req.losUrl());
+        AecbReport aecb = activities.aecb(appId, req.userDetails().emiratesId(), consent.consentRecordId(), req.httpbinUrl(), req.losUrl());
 
-        // Stage 2: Consent capture
-        ConsentRecord consent = activities.captureConsent(appId);
-
-        // Stage 3: AECB fetch
-        AecbReport aecb = activities.fetchAecb(appId, request.userDetails().emiratesId(), consent.consentRecordId());
-
-        // Stage 4: Open Banking (conditional)
-        OpenBankingSnapshot openBanking = null;
+        OpenBankingSnapshot ob = null;
         if (config.openBanking().enabled()) {
-            openBanking = activities.fetchOpenBanking(appId, consent.consentRecordId());
+            ob = activities.openBanking(appId, consent.consentRecordId(), req.httpbinUrl(), req.losUrl());
         }
 
-        // Stage 5: Decisioning
-        RiskScore decision = activities.scoreApplication(appId, aecb, openBanking, productId);
+        RiskScore decision = activities.decision(appId, aecb, ob, req.productId(), req.httpbinUrl(), req.losUrl());
 
-        // Stage 6: Underwriting (if manual review required)
-        if (decision.outcome() == RiskScore.Outcome.MANUAL) {
-            log.info("Application {} requires manual underwriting", appId);
-
-            activities.markForUnderwriting(appId);
-
-            Workflow.await(() -> pendingDecision != null);
-
-            activities.applyUnderwritingDecision(appId, pendingDecision);
-        }
-
-        log.info("Temporal credit check workflow completed for application: {}", appId);
+        log.info("[Temporal] Workflow completed for {}: {}", appId, decision.outcome());
     }
 
-    @Override
-    public void underwriterDecision(UnderwritingDecision decision) {
-        log.info("Received underwriter decision: {}", decision);
-        this.pendingDecision = decision;
+    @ActivityInterface
+    public interface Activities {
+        ConsentRecord consent(UUID appId, String httpbinUrl, String losUrl);
+        AecbReport aecb(UUID appId, String emiratesId, String consentId, String httpbinUrl, String losUrl);
+        OpenBankingSnapshot openBanking(UUID appId, String consentId, String httpbinUrl, String losUrl);
+        RiskScore decision(UUID appId, AecbReport aecb, OpenBankingSnapshot ob, String productId, String httpbinUrl, String losUrl);
+    }
+
+    public static class ActivitiesImpl implements Activities {
+        @Override
+        public ConsentRecord consent(UUID appId, String httpbinUrl, String losUrl) {
+            WorkflowClient client = new WorkflowClient(httpbinUrl, losUrl);
+            ConsentRecord result = client.captureConsent(appId);
+            client.notifyLos(appId, new ApplicationEvent.StageCompleted("consent", result));
+            return result;
+        }
+
+        @Override
+        public AecbReport aecb(UUID appId, String emiratesId, String consentId, String httpbinUrl, String losUrl) {
+            WorkflowClient client = new WorkflowClient(httpbinUrl, losUrl);
+            AecbReport result = client.fetchAecb(emiratesId, consentId);
+            client.notifyLos(appId, new ApplicationEvent.StageCompleted("aecb", result));
+            return result;
+        }
+
+        @Override
+        public OpenBankingSnapshot openBanking(UUID appId, String consentId, String httpbinUrl, String losUrl) {
+            WorkflowClient client = new WorkflowClient(httpbinUrl, losUrl);
+            OpenBankingSnapshot result = client.fetchOpenBanking(appId, consentId);
+            client.notifyLos(appId, new ApplicationEvent.StageCompleted("open_banking", result));
+            return result;
+        }
+
+        @Override
+        public RiskScore decision(UUID appId, AecbReport aecb, OpenBankingSnapshot ob, String productId, String httpbinUrl, String losUrl) {
+            WorkflowClient client = new WorkflowClient(httpbinUrl, losUrl);
+            RiskScore result = client.scoreApplication(aecb, ob, productId);
+            client.notifyLos(appId, new ApplicationEvent.DecisionMade(result));
+            return result;
+        }
     }
 }
