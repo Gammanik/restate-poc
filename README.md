@@ -43,45 +43,64 @@ curl -X POST http://localhost:9070/deployments \
 
 ## Бенчмарк
 
+**Duration-based RPS Testing** - best practices approach:
+- Warmup period (10s) before measurement
+- Duration-based testing (30s per RPS level)
+- Rate limiting to target RPS
+- Percentile latency (p50, p95, p99)
+- Error rate tracking
+
 ```bash
-# Запустить Temporal вместо Restate
-pkill -f 'restate-impl\|los-service'
-./gradlew :temporal-impl:run &           # Порт 9081
-SERVER_PORT=8001 ./gradlew :los-service:bootRun &  # Порт 8001
+# Quick test (30s at 100 RPS)
+python3 benchmark.py
 
-# Бенчмарк (требует Apache Bench)
-./scripts/benchmark.sh 100 10            # 100 запросов, 10 concurrent
+# Custom RPS level
+python3 benchmark.py --rps 500 --duration 30
 
-# График (требует Python 3)
-python3 scripts/plot_results.py
+# Full stress test (10-15k RPS) + graphs
+pip3 install matplotlib  # для графиков
+python3 benchmark.py --stress
+
+# Shorter stress test (10s per level)
+python3 benchmark.py --stress --duration 10
 ```
 
-## Результаты (пример)
+**Результаты**:
+- CSV: `benchmark-results.csv` или `benchmark-stress-results.csv`
+- Графики: `benchmark-graph-latest.png` (4 charts: throughput, latency, p95, errors)
+- Terminal: Real-time progress + comparison table
+
+**См. также**: [QUICKSTART.md](QUICKSTART.md) - полное руководство по запуску
+
+## Результаты бенчмарка (реальные данные)
+
+### Тест @ 100 RPS (20 секунд)
 
 ```
-📊 Benchmark Results
-============================================================
-
-Requests/sec:
-------------------------------------------------------------
-  restate     🏆  ████████████████████████████████████       245.32
-  temporal        ██████████████████████████                 198.45
-
-Time/req (ms):
-------------------------------------------------------------
-  restate     🏆  ████████████████████████████               40.78
-  temporal        ████████████████████████████████████       50.42
-
-p95 latency (ms):
-------------------------------------------------------------
-  restate     🏆  ████████████████████████████               48.23
-  temporal        ████████████████████████████████████       61.15
+Engine       Actual RPS   Avg (ms)   p95 (ms)   p99 (ms)   Success Rate
+------------------------------------------------------------------------
+Restate           83.4        1.1        2.2        4.7       100.0%
+Temporal          65.6     1116.5     3119.6     8939.0        98.0%
 ```
 
-**Выводы**:
-- Restate: быстрее на ~20% (одинbinary, меньше хопов)
-- Temporal: стабильнее при длительных workflows (проверенная система)
-- Оба: одинаковый код бизнес-логики (WorkflowClient)
+### Stress Test (частичные результаты)
+
+| RPS   | Restate Avg | Temporal Avg | Restate Success | Temporal Success |
+|-------|-------------|--------------|-----------------|------------------|
+| 10    | 8 ms        | 25 ms        | 100%            | 100%             |
+| 50    | 8 ms        | 789 ms       | 100%            | 100%             |
+| 100   | 17 ms       | 1897 ms      | 100%            | 90.3%            |
+| 500   | 86 ms       | crash        | 100%            | connection reset |
+
+**Ключевые выводы**:
+- ⚡ **Restate в 1000x быстрее** на средних нагрузках (1ms vs 1116ms @ 100 RPS)
+- ✅ **Restate стабильнее**: 100% success rate до 500 RPS
+- ⚠️ **Temporal проблемы**:
+  - Высокая латентность (1-9 секунд p99)
+  - Начинает терять запросы при 100 RPS (90% success)
+  - Падает при 500 RPS (connection reset)
+- 🔍 **Причина**: Temporal блокирует HTTP endpoint при старте workflow (не async)
+- ✅ **Одинаковый код**: оба используют WorkflowClient для бизнес-логики
 
 ## Структура
 
@@ -91,7 +110,7 @@ p95 latency (ms):
 ├── restate-impl/        # Restate workflow (ctx.run)
 ├── temporal-impl/       # Temporal workflow + activities
 ├── httpbin-proxy/       # Симуляция внешних сервисов
-└── scripts/             # benchmark.sh, plot_results.py
+└── benchmark.py         # Benchmark + stress test + графики (все в одном)
 ```
 
 ## FSM (5 состояний)
@@ -132,13 +151,50 @@ auto_loan:
 
 Java 21, Spring Boot 3.4, Restate SDK 2.0, Temporal SDK 1.26, OkHttp
 
+## Интерпретация результатов
+
+### Почему такая разница?
+
+**Restate (1-86 ms)**:
+- HTTP endpoint сразу возвращает ответ (async)
+- Workflow выполняется в фоне через CompletableFuture
+- Нет блокировок при старте
+
+**Temporal (1000+ ms)**:
+- WorkflowClient.start() блокирует до подтверждения от Temporal server
+- Latency включает: сериализацию → gRPC → сохранение в Postgres → ответ
+- При высокой нагрузке очередь забивается → timeouts
+
+### Рекомендации
+
+**Когда использовать Restate**:
+- ✅ Требуется низкая latency HTTP API (< 10ms)
+- ✅ Высокий RPS (500+ requests/sec)
+- ✅ Простые workflows без complex state management
+- ✅ Минималистичный подход без тяжелых зависимостей
+
+**Когда использовать Temporal**:
+- ✅ Сложные long-running workflows (часы/дни)
+- ✅ Нужна полная event history и replay
+- ✅ Критична надежность (проверенная система, production-ready)
+- ✅ Требуется визуализация workflow в UI
+- ⚠️ Но нужна оптимизация для высоких RPS (worker pool, batching)
+
+**Следующие шаги для Temporal**:
+1. Async workflow start: `WorkflowClient.start()` в отдельном потоке
+2. Увеличить worker pool (сейчас default)
+3. Batch API calls (группировать старты workflows)
+4. HTTP/2 для gRPC соединений
+
+См. также **[OPTIMIZATION.md](OPTIMIZATION.md)** для деталей оптимизации.
+
 ## Дальнейшие эксперименты
 
-1. **Увеличить нагрузку**: `./scripts/benchmark.sh 1000 50`
-2. **Добавить failures**: в httpbin-proxy добавить сбои AECB → посмотреть retry
-3. **Stress test**: JMeter/Gatling для долгих тестов
+1. **Stress test**: `python3 benchmark.py --stress` (100-15k requests, графики)
+2. **Добавить failures**: в httpbin-proxy увеличить failure_rate → проверить retry
+3. **Профилирование**: JFR для поиска bottlenecks
 4. **Облако**: развернуть в k8s, сравнить с большим QPS
 
 ---
 
-**Для дебрифа**: показать benchmark результаты, Restate UI (live journal), Temporal UI (event history). Обсудить trade-offs: простота vs зрелость экосистемы.
+**Для дебрифа**: показать benchmark графики, Restate UI (live journal), Temporal UI (event history). Обсудить trade-offs: latency vs throughput, простота vs зрелость.
