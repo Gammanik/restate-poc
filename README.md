@@ -28,7 +28,7 @@ Workflow        Workflow
 docker compose up -d
 
 # 2. Services
-./gradlew :httpbin-proxy:bootRun &      # Port 8090
+./gradlew :httpbin-proxy:bootRun &      # Port 8091
 ./gradlew :restate-impl:run &            # Port 9080
 ./gradlew :los-service:bootRun &         # Port 8000
 

@@ -1,5 +1,5 @@
 server:
-  port: 8090
+  port: 8091
 
 spring:
   application:
@@ -19,4 +19,4 @@ simulation:
 
 logging:
   level:
-    com.mal.lospoc.httpbin: DEBUG
+    com.mal.lospoc.httpbin: INFO

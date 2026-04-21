@@ -8,8 +8,6 @@ import com.mal.lospoc.common.domain.LoanProductConfig;
 import com.mal.lospoc.common.dto.*;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -24,10 +22,9 @@ import java.util.concurrent.CompletableFuture;
  * For POC - demonstrates workflow orchestration without complex SDK setup
  */
 public class RestateApp {
-    private static final Logger log = LoggerFactory.getLogger(RestateApp.class);
     private static final ObjectMapper json = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final String LOS_URL = "http://localhost:8000";
-    private static final String HTTPBIN_URL = "http://localhost:8090";
+    private static final String HTTPBIN_URL = "http://localhost:8091";
 
     public static void main(String[] args) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(8000), 0);
@@ -60,7 +57,7 @@ public class RestateApp {
                     try {
                         executeWorkflow(appId, req.productId, req.userDetails, config);
                     } catch (Exception e) {
-                        log.error("[Restate] Workflow failed for {}: {}", appId, e.getMessage(), e);
+                        // Workflow failed silently
                     }
                 });
 
@@ -70,41 +67,32 @@ public class RestateApp {
                 ));
 
             } catch (Exception e) {
-                log.error("Request failed", e);
                 sendResponse(exchange, 500, Map.of("error", e.getMessage()));
             }
         });
 
         server.setExecutor(null);
         server.start();
-        log.info("[Restate] HTTP server started on port 8000");
+        System.out.println("Restate HTTP server started successfully on port 8000");
     }
 
     private static void executeWorkflow(UUID appId, String productId, UserDetails userDetails, LoanProductConfig config) {
         WorkflowClient client = new WorkflowClient(HTTPBIN_URL, LOS_URL);
 
-        log.info("[Restate] Starting workflow for {}", appId);
-
-        // Stage 1: Consent
         ConsentRecord consent = client.captureConsent(appId);
         client.notifyLos(appId, new ApplicationEvent.StageCompleted("consent", consent));
 
-        // Stage 2: AECB
         AecbReport aecb = client.fetchAecb(userDetails.emiratesId(), consent.consentRecordId());
         client.notifyLos(appId, new ApplicationEvent.StageCompleted("aecb", aecb));
 
-        // Stage 3: Open Banking (conditional)
         OpenBankingSnapshot ob = null;
         if (config.openBanking().enabled()) {
             ob = client.fetchOpenBanking(appId, consent.consentRecordId());
             client.notifyLos(appId, new ApplicationEvent.StageCompleted("open_banking", ob));
         }
 
-        // Stage 4: Decisioning
         RiskScore decision = client.scoreApplication(aecb, ob, productId);
         client.notifyLos(appId, new ApplicationEvent.DecisionMade(decision));
-
-        log.info("[Restate] Workflow completed for {}: {}", appId, decision.outcome());
     }
 
     private static void sendResponse(HttpExchange exchange, int code, Object body) throws IOException {

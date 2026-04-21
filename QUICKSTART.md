@@ -18,7 +18,7 @@ docker compose ps
 # Should show: temporal, postgres, restate, temporal-ui
 
 # 3. Start application services
-./gradlew :httpbin-proxy:bootRun &   # Port 8090 - Mock external services
+./gradlew :httpbin-proxy:bootRun &   # Port 8091 - Mock external services
 ./gradlew :restate-impl:run &        # Port 8000 - Restate workflow
 ./gradlew :temporal-impl:run &       # Port 8001 - Temporal workflow
 
@@ -28,7 +28,7 @@ sleep 20
 # 4. Verify services are up
 curl http://localhost:8000  # Should return: {"status":"ok","service":"restate"}
 curl http://localhost:8001  # Should return: {"status":"ok","service":"temporal"}
-curl http://localhost:8090  # Should return 404 (but server is up)
+curl http://localhost:8091  # Should return 404 (but server is up)
 ```
 
 ## 📊 Run Benchmark
@@ -137,7 +137,7 @@ Benchmark measures:
                     ↓
          ┌──────────────────┐
          │  httpbin-proxy   │  Simulates:
-         │   Port 8090      │  - AECB
+         │   Port 8091      │  - AECB
          └──────────────────┘  - Open Banking
 ```
 

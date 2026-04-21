@@ -23,7 +23,7 @@
 - ✅ **Health endpoint**: GET / returns {"status":"ok"}
 
 #### Supporting Services
-- ✅ **httpbin-proxy** (Port 8090): Simulates AECB (2s), Open Banking (500ms), etc.
+- ✅ **httpbin-proxy** (Port 8091): Simulates AECB (2s), Open Banking (500ms), etc.
 - ✅ **Docker compose**: Temporal server, Postgres, Restate server, Temporal UI
 
 ### 3. Benchmark System
@@ -113,7 +113,7 @@ RPS    Restate        Temporal       Restate Success  Temporal Success
 Successfully ran benchmarks comparing Restate vs Temporal:
 
 1. ✅ Started Docker infrastructure (Temporal server, Postgres, Restate server)
-2. ✅ Started all services (httpbin-proxy:8090, restate:8000, temporal:8001)
+2. ✅ Started all services (httpbin-proxy:8091, restate:8000, temporal:8001)
 3. ✅ Ran quick test @ 100 RPS for 20 seconds
 4. ✅ Ran partial stress test (10, 50, 100, 500 RPS)
 5. ✅ Updated README with real benchmark results
