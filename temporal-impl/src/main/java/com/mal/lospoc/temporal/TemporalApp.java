@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.mal.lospoc.common.domain.LoanProductConfig;
 import com.mal.lospoc.common.dto.UserDetails;
-import com.mal.lospoc.temporal.workflow.CreditCheckWorkflow;
 import com.mal.lospoc.temporal.workflow.CreditCheckWorkflowImpl;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -66,8 +65,8 @@ public class TemporalApp {
                 UUID appId = UUID.randomUUID();
                 LoanProductConfig config = createDefaultConfig(req.productId);
 
-                CreditCheckWorkflow workflow = client.newWorkflowStub(
-                    CreditCheckWorkflow.class,
+                CreditCheckWorkflowImpl workflow = client.newWorkflowStub(
+                    CreditCheckWorkflowImpl.class,
                     WorkflowOptions.newBuilder()
                         .setTaskQueue(TASK_QUEUE)
                         .setWorkflowId("credit-check-" + appId)

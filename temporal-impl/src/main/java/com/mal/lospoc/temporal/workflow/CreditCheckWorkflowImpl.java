@@ -7,12 +7,15 @@ import com.mal.lospoc.common.dto.*;
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.workflow.Workflow;
+import io.temporal.workflow.WorkflowInterface;
+import io.temporal.workflow.WorkflowMethod;
 import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.UUID;
 
-public class CreditCheckWorkflowImpl implements CreditCheckWorkflow {
+@WorkflowInterface
+public class CreditCheckWorkflowImpl {
     private static final Logger log = Workflow.getLogger(CreditCheckWorkflowImpl.class);
 
     private final Activities activities = Workflow.newActivityStub(
@@ -22,7 +25,7 @@ public class CreditCheckWorkflowImpl implements CreditCheckWorkflow {
             .build()
     );
 
-    @Override
+    @WorkflowMethod
     public void run(CreditCheckRequest req) {
         UUID appId = req.applicationId();
         LoanProductConfig config = req.productConfig();
@@ -41,6 +44,15 @@ public class CreditCheckWorkflowImpl implements CreditCheckWorkflow {
 
         log.info("[Temporal] Workflow completed for {}: {}", appId, decision.outcome());
     }
+
+    public record CreditCheckRequest(
+        UUID applicationId,
+        String productId,
+        UserDetails userDetails,
+        LoanProductConfig productConfig,
+        String httpbinUrl,
+        String losUrl
+    ) {}
 
     @ActivityInterface
     public interface Activities {
