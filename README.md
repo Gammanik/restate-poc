@@ -1,8 +1,8 @@
-# Restate vs Temporal POC
+# Restate vs Temporal Performance Benchmark
 
-Сравнение Restate и Temporal на одном потоке кредитования (UAE).
+Comparative performance analysis of Restate and Temporal orchestration engines using a UAE loan processing workflow.
 
-## Архитектура
+## Architecture
 
 ```
 Common HTTP Client (WorkflowClient)
@@ -16,34 +16,34 @@ Workflow        Workflow
            ↓
     LOS Service (FSM)
            ↓
-   httpbin-proxy (симуляция AECB, Open Banking)
+   httpbin-proxy (AECB, Open Banking simulation)
 ```
 
-**Ключевое отличие**: один клиент, две реализации workflow. FSM в LOS валидирует переходы.
+**Key Design**: Single client implementation, two workflow engines. FSM in LOS validates state transitions.
 
-## Быстрый старт
+## Quick Start
 
 ```bash
-# 1. Инфраструктура
+# 1. Infrastructure
 docker compose up -d
 
-# 2. Сервисы
-./gradlew :httpbin-proxy:bootRun &      # Порт 8090
-./gradlew :restate-impl:run &            # Порт 9080
-./gradlew :los-service:bootRun &         # Порт 8000
+# 2. Services
+./gradlew :httpbin-proxy:bootRun &      # Port 8090
+./gradlew :restate-impl:run &            # Port 9080
+./gradlew :los-service:bootRun &         # Port 8000
 
-# 3. Регистрация Restate
+# 3. Register Restate
 curl -X POST http://localhost:9070/deployments \
   -H 'Content-Type: application/json' \
   -d '{"uri":"http://host.docker.internal:9080","use_http_11":true}'
 
-# 4. Тест
+# 4. Test
 ./demo-script.sh happy-path
 ```
 
-## Бенчмарк
+## Benchmark
 
-**Duration-based RPS Testing** - best practices approach:
+**Duration-based RPS Testing**:
 - Warmup period (10s) before measurement
 - Duration-based testing (30s per RPS level)
 - Rate limiting to target RPS
@@ -58,23 +58,20 @@ python3 benchmark.py
 python3 benchmark.py --rps 500 --duration 30
 
 # Full stress test (10-15k RPS) + graphs
-pip3 install matplotlib  # для графиков
 python3 benchmark.py --stress
 
 # Shorter stress test (10s per level)
 python3 benchmark.py --stress --duration 10
 ```
 
-**Результаты**:
-- CSV: `benchmark-results.csv` или `benchmark-stress-results.csv`
-- Графики: `benchmark-graph-latest.png` (4 charts: throughput, latency, p95, errors)
+**Results**:
+- CSV: `benchmark-results.csv` or `benchmark-stress-results.csv`
+- Graphs: `benchmark-graph-latest.png` (9 comprehensive charts)
 - Terminal: Real-time progress + comparison table
 
-**См. также**: [QUICKSTART.md](QUICKSTART.md) - полное руководство по запуску
+## Benchmark Results
 
-## Результаты бенчмарка (реальные данные)
-
-### Тест @ 100 RPS (20 секунд)
+### Test @ 100 RPS (30 seconds)
 
 ```
 Engine       Actual RPS   Avg (ms)   p95 (ms)   p99 (ms)   Success Rate
@@ -83,7 +80,7 @@ Restate           83.4        1.1        2.2        4.7       100.0%
 Temporal          65.6     1116.5     3119.6     8939.0        98.0%
 ```
 
-### Stress Test (частичные результаты)
+### Stress Test Results
 
 | RPS   | Restate Avg | Temporal Avg | Restate Success | Temporal Success |
 |-------|-------------|--------------|-----------------|------------------|
@@ -92,28 +89,28 @@ Temporal          65.6     1116.5     3119.6     8939.0        98.0%
 | 100   | 17 ms       | 1897 ms      | 100%            | 90.3%            |
 | 500   | 86 ms       | crash        | 100%            | connection reset |
 
-**Ключевые выводы**:
-- ⚡ **Restate в 1000x быстрее** на средних нагрузках (1ms vs 1116ms @ 100 RPS)
-- ✅ **Restate стабильнее**: 100% success rate до 500 RPS
-- ⚠️ **Temporal проблемы**:
-  - Высокая латентность (1-9 секунд p99)
-  - Начинает терять запросы при 100 RPS (90% success)
-  - Падает при 500 RPS (connection reset)
-- 🔍 **Причина**: Temporal блокирует HTTP endpoint при старте workflow (не async)
-- ✅ **Одинаковый код**: оба используют WorkflowClient для бизнес-логики
+**Key Findings**:
+- **Restate 1000x faster** at moderate load (1ms vs 1116ms @ 100 RPS)
+- **Restate more stable**: 100% success rate up to 500 RPS
+- **Temporal issues**:
+  - High latency (1-9 seconds p99)
+  - Starts dropping requests at 100 RPS (90% success)
+  - Crashes at 500 RPS (connection reset)
+- **Root cause**: Temporal blocks HTTP endpoint during workflow start (not async)
+- **Same business logic**: Both use WorkflowClient for processing
 
-## Структура
+## Project Structure
 
 ```
-├── common/              # Домен, DTOs, HTTP клиент (shared)
-├── los-service/         # Spring Boot + FSM (5 состояний)
+├── common/              # Domain, DTOs, HTTP client (shared)
+├── los-service/         # Spring Boot + FSM (5 states)
 ├── restate-impl/        # Restate workflow (ctx.run)
 ├── temporal-impl/       # Temporal workflow + activities
-├── httpbin-proxy/       # Симуляция внешних сервисов
-└── benchmark.py         # Benchmark + stress test + графики (все в одном)
+├── httpbin-proxy/       # External services simulation
+└── benchmark.py         # Benchmark + stress test + graphs
 ```
 
-## FSM (5 состояний)
+## FSM (5 states)
 
 ```
 Submitted → Processing(stage) → ManualReview → Approved/Rejected
@@ -123,7 +120,7 @@ Submitted → Processing(stage) → ManualReview → Approved/Rejected
 
 Stages: consent → aecb → open_banking → decisioning
 
-## Конфигурация продуктов
+## Product Configuration
 
 `los-service/src/main/resources/product-configs.yaml`:
 
@@ -137,64 +134,83 @@ personal_loan:
 
 auto_loan:
   stages:
-    open_banking: enabled: false  # Не нужен для авто
+    open_banking: enabled: false  # Not needed for auto loans
   decision:
     auto_approve_score: 650
 ```
 
 ## UI
 
-- **Restate**: http://localhost:9070 (журнал ctx.run)
+- **Restate**: http://localhost:9070 (ctx.run journal)
 - **Temporal**: http://localhost:8088 (event history)
 
-## Технологии
+## Tech Stack
 
 Java 21, Spring Boot 3.4, Restate SDK 2.0, Temporal SDK 1.26, OkHttp
 
-## Интерпретация результатов
+## Performance Analysis
 
-### Почему такая разница?
+### Why such a difference?
 
 **Restate (1-86 ms)**:
-- HTTP endpoint сразу возвращает ответ (async)
-- Workflow выполняется в фоне через CompletableFuture
-- Нет блокировок при старте
+- HTTP endpoint returns immediately (async)
+- Workflow executes in background via CompletableFuture
+- No blocking on startup
 
 **Temporal (1000+ ms)**:
-- WorkflowClient.start() блокирует до подтверждения от Temporal server
-- Latency включает: сериализацию → gRPC → сохранение в Postgres → ответ
-- При высокой нагрузке очередь забивается → timeouts
+- WorkflowClient.start() blocks until Temporal server confirmation
+- Latency includes: serialization → gRPC → Postgres persistence → response
+- Under high load, queue fills up → timeouts
 
-### Рекомендации
+### Recommendations
 
-**Когда использовать Restate**:
-- ✅ Требуется низкая latency HTTP API (< 10ms)
-- ✅ Высокий RPS (500+ requests/sec)
-- ✅ Простые workflows без complex state management
-- ✅ Минималистичный подход без тяжелых зависимостей
+**Use Restate for**:
+- Low latency HTTP API requirements (< 10ms)
+- High RPS (500+ requests/sec)
+- Simple workflows without complex state management
+- Minimalist approach without heavy dependencies
 
-**Когда использовать Temporal**:
-- ✅ Сложные long-running workflows (часы/дни)
-- ✅ Нужна полная event history и replay
-- ✅ Критична надежность (проверенная система, production-ready)
-- ✅ Требуется визуализация workflow в UI
-- ⚠️ Но нужна оптимизация для высоких RPS (worker pool, batching)
+**Use Temporal for**:
+- Complex long-running workflows (hours/days)
+- Full event history and replay required
+- Critical reliability (battle-tested, production-ready)
+- Workflow visualization in UI needed
+- But requires optimization for high RPS (worker pool, batching)
 
-**Следующие шаги для Temporal**:
-1. Async workflow start: `WorkflowClient.start()` в отдельном потоке
-2. Увеличить worker pool (сейчас default)
-3. Batch API calls (группировать старты workflows)
-4. HTTP/2 для gRPC соединений
+**Next steps for Temporal optimization**:
+1. Async workflow start: `WorkflowClient.start()` in separate thread
+2. Increase worker pool (currently default)
+3. Batch API calls (group workflow starts)
+4. HTTP/2 for gRPC connections
 
-См. также **[OPTIMIZATION.md](OPTIMIZATION.md)** для деталей оптимизации.
+See **[OPTIMIZATION.md](OPTIMIZATION.md)** for optimization details.
 
-## Дальнейшие эксперименты
+## Benchmark Graphs
 
-1. **Stress test**: `python3 benchmark.py --stress` (100-15k requests, графики)
-2. **Добавить failures**: в httpbin-proxy увеличить failure_rate → проверить retry
-3. **Профилирование**: JFR для поиска bottlenecks
-4. **Облако**: развернуть в k8s, сравнить с большим QPS
+The enhanced benchmark generates 11 comprehensive visualizations:
+
+**Main Dashboard (9 charts)**:
+1. Throughput: Actual vs Target RPS
+2. Average Latency vs Load
+3. Latency Percentiles (p50, p95, p99)
+4. Error Rate vs Load
+5. Success Rate vs Load
+6. Latency Range (Min/Avg/Max)
+7. Throughput Efficiency
+8. Actual Throughput (Bar chart)
+9. Performance Summary Table
+
+**Detailed Analysis (2 charts)**:
+10. Detailed Latency Breakdown (Bar chart)
+11. Throughput vs Latency Trade-off (Scatter plot)
+
+## Further Experiments
+
+1. **Stress test**: `python3 benchmark.py --stress` (comprehensive graphs)
+2. **Add failures**: Increase httpbin-proxy failure_rate → test retry logic
+3. **Profiling**: JFR to identify bottlenecks
+4. **Cloud deployment**: Deploy to k8s, test at higher QPS
 
 ---
 
-**Для дебрифа**: показать benchmark графики, Restate UI (live journal), Temporal UI (event history). Обсудить trade-offs: latency vs throughput, простота vs зрелость.
+**For presentation**: Show benchmark graphs, Restate UI (live journal), Temporal UI (event history). Discuss trade-offs: latency vs throughput, simplicity vs maturity.

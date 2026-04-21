@@ -12,7 +12,7 @@ submit() {
     local name=$2
     local amount=$3
 
-    echo -e "${GREEN}Отправка заявки: $product для $name${NC}"
+    echo -e "${GREEN}Submitting application: $product for $name${NC}"
 
     curl -s -X POST http://localhost:8000/api/applications \
         -H 'Content-Type: application/json' \
@@ -31,32 +31,32 @@ submit() {
 
 case "${1:-help}" in
     happy-path)
-        echo "Сценарий: Personal Loan (все стадии)"
+        echo "Scenario: Personal Loan (all stages)"
         submit "personal_loan" "Ahmed Al-Mansoori" 50000
         echo -e "\n${GREEN}UI: http://localhost:9070${NC}"
         ;;
 
     auto-loan)
-        echo "Сценарий: Auto Loan (без Open Banking)"
+        echo "Scenario: Auto Loan (skip Open Banking)"
         submit "auto_loan" "Fatima Hassan" 75000
         echo -e "\n${GREEN}UI: http://localhost:9070${NC}"
         ;;
 
     mortgage)
-        echo "Сценарий: Mortgage (большая сумма, все проверки)"
+        echo "Scenario: Mortgage (all stages, large amount)"
         submit "mortgage" "Mohammed Ali" 500000
         echo -e "\n${GREEN}UI: http://localhost:9070${NC}"
         ;;
 
     *)
-        echo "Использование: ./demo-script.sh [команда]"
+        echo "Usage: ./demo-script.sh [command]"
         echo ""
-        echo "Команды:"
-        echo "  happy-path  - Personal loan (все стадии)"
-        echo "  auto-loan   - Auto loan (пропуск Open Banking)"
-        echo "  mortgage    - Mortgage (все стадии, большая сумма)"
+        echo "Commands:"
+        echo "  happy-path  - Personal loan (all stages)"
+        echo "  auto-loan   - Auto loan (skip Open Banking)"
+        echo "  mortgage    - Mortgage (all stages, large amount)"
         echo ""
-        echo "Старт:"
+        echo "Start:"
         echo "  docker compose up -d"
         echo "  ./gradlew :httpbin-proxy:bootRun &"
         echo "  ./gradlew :restate-impl:run &"

@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
 
 public class TemporalApp {
     public static final String TASK_QUEUE = "CREDIT_CHECK_QUEUE";
@@ -40,7 +41,8 @@ public class TemporalApp {
         System.out.println("[Temporal] Worker started on queue: " + TASK_QUEUE);
 
         // HTTP server to trigger workflows (for benchmark)
-        HttpServer server = HttpServer.create(new InetSocketAddress(8001), 0);
+        // Use larger backlog (1000) to handle high concurrent connections during benchmarks
+        HttpServer server = HttpServer.create(new InetSocketAddress(8001), 1000);
 
         // Health check endpoint
         server.createContext("/", exchange -> {
@@ -90,7 +92,8 @@ public class TemporalApp {
             }
         });
 
-        server.setExecutor(null);
+        // Use a fixed thread pool to handle concurrent requests efficiently
+        server.setExecutor(Executors.newFixedThreadPool(100));
         server.start();
         System.out.println("[Temporal] HTTP server started on port 8001");
     }
