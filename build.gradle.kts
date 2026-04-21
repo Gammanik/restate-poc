@@ -1,60 +1,41 @@
 plugins {
-    kotlin("jvm") version "2.1.0"
-    kotlin("plugin.spring") version "2.1.0"
-    kotlin("plugin.serialization") version "2.1.0"
-    id("org.springframework.boot") version "3.4.1"
-    id("io.spring.dependency-management") version "1.1.7"
-    id("com.google.devtools.ksp") version "2.1.0-1.0.29"
-    application
+    java
+    id("org.springframework.boot") version "3.4.1" apply false
+    id("io.spring.dependency-management") version "1.1.7" apply false
 }
 
-group = "org.example"
-version = "1.0-SNAPSHOT"
+allprojects {
+    group = "com.mal.lospoc"
+    version = "1.0.0"
 
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    // Spring Boot
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
-
-    // Kotlin Coroutines support for Spring
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
-
-    // Restate SDK
-    implementation("dev.restate:sdk-api-kotlin-gen:2.5.0") {
-        exclude(group = "org.slf4j", module = "slf4j-nop")
+    repositories {
+        mavenCentral()
     }
-    ksp("dev.restate:sdk-api-kotlin-gen:2.5.0")
+}
 
-    implementation("dev.restate:sdk-kotlin-http:2.5.0") {
-        exclude(group = "org.slf4j", module = "slf4j-nop")
+subprojects {
+    apply(plugin = "java")
+
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(21))
+        }
     }
 
-    // Logging
-    implementation("io.github.oshai:kotlin-logging-jvm:5.1.0")
-
-    // Exclude slf4j-nop from all configurations
-    configurations.all {
-        exclude(group = "org.slf4j", module = "slf4j-nop")
+    tasks.withType<Test> {
+        useJUnitPlatform()
     }
 
-    testImplementation(kotlin("test"))
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
-}
+    dependencies {
+        val implementation by configurations
+        val testImplementation by configurations
 
-application {
-    mainClass.set("org.example.LoanApplicationKt")
-}
+        // Logging
+        implementation("org.slf4j:slf4j-api:2.0.9")
+        implementation("ch.qos.logback:logback-classic:1.4.14")
 
-tasks.test {
-    useJUnitPlatform()
-}
-
-kotlin {
-    jvmToolchain(23)
+        // Testing
+        testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+        testImplementation("org.assertj:assertj-core:3.24.2")
+    }
 }

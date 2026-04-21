@@ -37,3 +37,10 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Application ###
+*.log
+comparison/stress-results.md
+
+### Kotlin (generated code) ###
+.kotlin/

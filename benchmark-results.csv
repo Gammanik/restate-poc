@@ -1,0 +1,3 @@
+engine,target_rps,actual_rps,duration_sec,total_requests,successful,errors,error_rate,avg_ms,min_ms,max_ms,p50_ms,p95_ms,p99_ms
+restate,100,87.49,30.0,2629,2629,0,0.0,12.74,0.45,146.75,6.18,45.44,72.46
+temporal,100,87.67,30.1,2638,2638,0,0.0,115.91,6.35,669.05,84.07,315.73,469.16

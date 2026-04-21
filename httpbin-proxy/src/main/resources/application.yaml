@@ -1,0 +1,22 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: httpbin-proxy
+
+simulation:
+  latency:
+    consent: 100
+    aecb: 2000
+    open_banking: 500
+    decision_engine: 200
+  failure_rate:
+    consent: 0.05
+    aecb: 0.10
+    open_banking: 0.05
+    decision_engine: 0.02
+
+logging:
+  level:
+    com.mal.lospoc.httpbin: DEBUG
