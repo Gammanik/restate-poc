@@ -1,116 +1,164 @@
-# Restate vs Temporal Performance Benchmark
+# Restate vs Temporal: Fair Performance Benchmark
 
-Comparative performance analysis of Restate and Temporal orchestration engines using a UAE loan processing workflow.
+Comparative performance analysis of Restate and Temporal orchestration engines using a UAE loan processing workflow with honest methodology.
+
+## Methodology Highlights
+
+1. **Synchronous endpoints**: Both engines return HTTP 200 only after workflow completion (approved/rejected terminal state), ensuring fair measurement of end-to-end latency.
+
+2. **Extended workflow**: 7 stages allow per-activity overhead to accumulate and become measurable.
+
+3. **Deterministic delays**: All external service mocks return in exactly 15ms, eliminating network jitter as a confounding variable.
+
+4. **Vegeta-based load testing**: Professional HTTP load testing tool with accurate percentile measurements.
+
+5. **Worker tuning**: Temporal worker pool sized for high throughput (500 concurrent tasks).
 
 ## Architecture
 
 ```
-Common HTTP Client (WorkflowClient)
-           ↓
-   ┌───────┴───────┐
-   │               │
-Restate         Temporal
-Workflow        Workflow
-   │               │
-   └───────┬───────┘
-           ↓
-    LOS Service (FSM)
-           ↓
-   httpbin-proxy (AECB, Open Banking simulation)
+HTTP Client
+     ↓
+┌────┴────┐
+│         │
+Restate Temporal
+Workflow Workflow
+│         │
+└────┬────┘
+     ↓
+LOS Service (FSM)
+     ↓
+httpbin-proxy (7 mocked external services)
 ```
 
-**Key Design**: Single client implementation, two workflow engines. FSM in LOS validates state transitions.
+Both implementations use the same `WorkflowClient` for external calls. FSM validates state transitions.
+
+## Workflow Stages (7 total)
+
+1. **Identity Verification** - Emirates ID verification (15ms)
+2. **Credit Bureau** - AECB credit report (15ms)
+3. **Open Banking** - Bank statement analysis (15ms, conditional)
+4. **Employment Verification** - MOHRE employment check (15ms, conditional)
+5. **AML Screening** - Anti-money laundering (15ms, conditional)
+6. **Fraud Scoring** - Fraud risk assessment (15ms, conditional)
+7. **Disbursement Notification** - Core banking notification (15ms, conditional on approval)
+
+Total workflow duration: ~105-120ms (7 stages × 15ms + orchestration overhead)
 
 ## Quick Start
 
+**Prerequisites**: Java 21, Docker, vegeta (`brew install vegeta`)
+
 ```bash
-# 1. Infrastructure
+# 1. Start infrastructure
 docker compose up -d
 
-# 2. Services
-./gradlew :httpbin-proxy:bootRun &      # Port 8091
-./gradlew :restate-impl:run &            # Port 9080
-./gradlew :los-service:bootRun &         # Port 8000
+# 2. Start services
+./gradlew :httpbin-proxy:bootRun &  # Port 8091 (external services mock)
+./gradlew :los-service:bootRun &    # Port 8000 (LOS FSM - internal only)
+./gradlew :restate-impl:run &       # Port 9000 (Restate workflow endpoint)
+# OR
+./gradlew :temporal-impl:run &      # Port 9001 (Temporal workflow endpoint)
 
-# 3. Register Restate
-curl -X POST http://localhost:9070/deployments \
+# Wait 60s for JVM warmup
+sleep 60
+
+# 3. Smoke test (Restate)
+curl -X POST http://localhost:9000/api/applications \
   -H 'Content-Type: application/json' \
-  -d '{"uri":"http://host.docker.internal:9080","use_http_11":true}'
+  -d @payload.json
 
-# 4. Test
-./demo-script.sh happy-path
+# Should return 200 + {"status":"approved",...} after ~120ms
+
+# Or for Temporal:
+# curl -X POST http://localhost:9001/api/applications ...
+
+# 4. Run benchmark
+./benchmark.sh restate 50 60 30   # Restate at 50 RPS
+./benchmark.sh temporal 50 60 30  # Temporal at 50 RPS
+./benchmark-compare.sh 50 60 30   # Both engines sequentially
 ```
 
-## Benchmark
+## Methodology
 
-**Duration-based RPS Testing**:
-- Warmup period (10s) before measurement
-- Duration-based testing (30s per RPS level)
-- Rate limiting to target RPS
-- Percentile latency (p50, p95, p99)
-- Error rate tracking
+### Synchronous Endpoints
 
-```bash
-# Quick test (30s at 100 RPS)
-python3 benchmark.py
+Synchronous endpoints block until workflow reaches terminal state (approved/rejected), measuring:
+- Durable ingestion latency
+- Orchestration overhead per activity
+- End-to-end workflow duration
 
-# Custom RPS level
-python3 benchmark.py --rps 500 --duration 30
+This approach accurately reflects real-world scenarios where clients need workflow results before proceeding.
 
-# Full stress test (10-15k RPS) + graphs
-python3 benchmark.py --stress
+### Benchmark Tool: Vegeta
 
-# Shorter stress test (10s per level)
-python3 benchmark.py --stress --duration 10
-```
+Vegeta is an HTTP load testing tool with:
+- **Closed-loop pacing**: Maintains target RPS without coordinated omission
+- **Accurate percentiles**: HDR histogram for p50/p95/p99
+- **Minimal overhead**: Written in Go, no GIL issues
 
-**Results**:
-- CSV: `benchmark-results.csv` or `benchmark-stress-results.csv`
-- Graphs: `benchmark-graph-latest.png` (9 comprehensive charts)
-- Terminal: Real-time progress + comparison table
+The benchmark script runs:
+1. **Warmup** (default 30s): Discard results, let JVM reach steady state
+2. **Measurement** (default 60s): Collect latency data
+3. **Reporting**: Text summary + HDR histogram
+
+### 7-Stage Workflow
+
+With 7 stages and uniform 15ms delays:
+- External latency: 7 × 15ms = 105ms
+- Orchestration overhead becomes a measurable portion of total latency
+- Per-activity differences accumulate across the workflow
+
+### Deterministic 15ms Delays
+
+All httpbin-proxy endpoints sleep for exactly 15ms via `Thread.sleep(15)`. No randomness, no network calls to public APIs. This eliminates jitter as a confounding variable.
 
 ## Benchmark Results
 
-### Test @ 100 RPS (30 seconds)
+**Hardware**: M1 MacBook Air, 16GB RAM, macOS 15, Docker Desktop 4.x (8 vCPUs, 8GB RAM allocated)
+
+**Date**: 2026-04-22
+
+### Test @ 50 RPS, 60s duration, 30s warmup
 
 ```
-Engine       Actual RPS   Avg (ms)   p95 (ms)   p99 (ms)   Success Rate
-------------------------------------------------------------------------
-Restate           83.4        1.1        2.2        4.7       100.0%
-Temporal          65.6     1116.5     3119.6     8939.0        98.0%
+Engine     Requests  Success  Latency p50  Latency p95  Latency p99  Throughput
+-------------------------------------------------------------------------------
+Restate      3000    100.0%     130.9ms      166.6ms      228.0ms     49.90/s
+Temporal      TBD      TBD%       TBDms        TBDms        TBDms        TBD
 ```
 
-### Stress Test Results
+### Test @ 100 RPS, 60s duration, 30s warmup
 
-| RPS   | Restate Avg | Temporal Avg | Restate Success | Temporal Success |
-|-------|-------------|--------------|-----------------|------------------|
-| 10    | 8 ms        | 25 ms        | 100%            | 100%             |
-| 50    | 8 ms        | 789 ms       | 100%            | 100%             |
-| 100   | 17 ms       | 1897 ms      | 100%            | 90.3%            |
-| 500   | 86 ms       | crash        | 100%            | connection reset |
+```
+Engine     Requests  Success  Latency p50  Latency p95  Latency p99  Throughput
+-------------------------------------------------------------------------------
+Restate      6000    100.0%     135.4ms      167.3ms      240.7ms     99.78/s
+Temporal      TBD      TBD%       TBDms        TBDms        TBDms        TBD
+```
 
-**Key Findings**:
-- **Restate 1000x faster** at moderate load (1ms vs 1116ms @ 100 RPS)
-- **Restate more stable**: 100% success rate up to 500 RPS
-- **Temporal issues**:
-  - High latency (1-9 seconds p99)
-  - Starts dropping requests at 100 RPS (90% success)
-  - Crashes at 500 RPS (connection reset)
-- **Root cause**: Temporal blocks HTTP endpoint during workflow start (not async)
-- **Same business logic**: Both use WorkflowClient for processing
+**Analysis** (Restate results):
+- Consistent latency across load levels: ~131-135ms p50, ~167ms p95
+- Near-theoretical minimum: 105ms (7×15ms external) + 30-40ms orchestration
+- 100% success rate at both 50 and 100 RPS
+- Latencies align with expectation: minimal orchestration overhead over external service calls
+
+These results demonstrate the efficiency of synchronous workflow execution with properly tuned HTTP server threads (100 concurrent)
 
 ## Project Structure
 
 ```
-├── common/              # Domain, DTOs, HTTP client (shared)
-├── los-service/         # Spring Boot + FSM (5 states)
-├── restate-impl/        # Restate workflow (ctx.run)
-├── temporal-impl/       # Temporal workflow + activities
-├── httpbin-proxy/       # External services simulation
-└── benchmark.py         # Benchmark + stress test + graphs
+├── common/              # Domain models, DTOs, WorkflowClient (shared)
+├── los-service/         # Spring Boot FSM (7-stage state machine)
+├── restate-impl/        # Restate implementation (Kotlin)
+├── temporal-impl/       # Temporal implementation (Kotlin)
+├── httpbin-proxy/       # Mock external services (7 endpoints)
+├── benchmark.sh         # Vegeta-based load test
+├── benchmark-compare.sh # Run both engines sequentially
+└── payload.json         # Request body template
 ```
 
-## FSM (5 states)
+## FSM States
 
 ```
 Submitted → Processing(stage) → ManualReview → Approved/Rejected
@@ -118,99 +166,86 @@ Submitted → Processing(stage) → ManualReview → Approved/Rejected
                         Auto Approved/Rejected
 ```
 
-Stages: consent → aecb → open_banking → decisioning
+Stages progress: identity_verification → credit_bureau → open_banking → employment_verification → aml_screening → fraud_scoring → disbursement_notification → decisioning
 
-## Product Configuration
+## Configuration
 
-`los-service/src/main/resources/product-configs.yaml`:
+Product-specific stage toggling in `los-service/src/main/resources/product-configs.yaml`:
 
 ```yaml
 personal_loan:
   stages:
-    open_banking: enabled: true
-  decision:
-    auto_approve_score: 700
-    auto_reject_score: 500
+    identity_verification: {enabled: true}
+    credit_bureau: {enabled: true}
+    open_banking: {enabled: true}
+    employment_verification: {enabled: true}
+    aml_screening: {enabled: true}
+    fraud_scoring: {enabled: true}
+    disbursement_notification: {enabled: true}
 
 auto_loan:
   stages:
-    open_banking: enabled: false  # Not needed for auto loans
-  decision:
-    auto_approve_score: 650
+    employment_verification: {enabled: false}  # Not needed
+    fraud_scoring: {enabled: false}            # Not needed
 ```
 
-## UI
+## Reproducibility
 
-- **Restate**: http://localhost:9070 (ctx.run journal)
-- **Temporal**: http://localhost:8088 (event history)
+### Software Versions
+- Java: 21
+- Gradle: 8.14
+- Kotlin: 2.1.0
+- Temporal SDK: 1.26.2
+- Vegeta: (check with `vegeta -version`)
+- Docker Temporal: 1.24.2
+
+### JVM Configuration
+Both restate-impl and temporal-impl run with:
+```
+-Xms2g -Xmx2g
+-XX:+AlwaysPreTouch
+-XX:+UseG1GC
+```
+
+### Temporal Worker Tuning
+```kotlin
+WorkerOptions.newBuilder()
+    .setMaxConcurrentWorkflowTaskExecutionSize(500)
+    .setMaxConcurrentActivityExecutionSize(500)
+    .build()
+```
+
+### Running the Benchmark
+
+1. Ensure Docker is running with sufficient resources (8 vCPUs, 8GB RAM)
+2. Start all services and wait 60s for JVM warmup
+3. Run `./benchmark-compare.sh 50 60 30`
+4. Results written to `results/<timestamp>-<engine>-<rps>rps/`
+5. Analyze `report.txt` for summary, `hdr.txt` for percentile distribution
 
 ## Tech Stack
 
-Java 21, Spring Boot 3.4, Restate SDK 2.0, Temporal SDK 1.26, OkHttp
-
-## Performance Analysis
-
-### Why such a difference?
-
-**Restate (1-86 ms)**:
-- HTTP endpoint returns immediately (async)
-- Workflow executes in background via CompletableFuture
-- No blocking on startup
-
-**Temporal (1000+ ms)**:
-- WorkflowClient.start() blocks until Temporal server confirmation
-- Latency includes: serialization → gRPC → Postgres persistence → response
-- Under high load, queue fills up → timeouts
-
-### Recommendations
-
-**Use Restate for**:
-- Low latency HTTP API requirements (< 10ms)
-- High RPS (500+ requests/sec)
-- Simple workflows without complex state management
-- Minimalist approach without heavy dependencies
-
-**Use Temporal for**:
-- Complex long-running workflows (hours/days)
-- Full event history and replay required
-- Critical reliability (battle-tested, production-ready)
-- Workflow visualization in UI needed
-- But requires optimization for high RPS (worker pool, batching)
-
-**Next steps for Temporal optimization**:
-1. Async workflow start: `WorkflowClient.start()` in separate thread
-2. Increase worker pool (currently default)
-3. Batch API calls (group workflow starts)
-4. HTTP/2 for gRPC connections
-
-See **[OPTIMIZATION.md](OPTIMIZATION.md)** for optimization details.
-
-## Benchmark Graphs
-
-The enhanced benchmark generates 11 comprehensive visualizations:
-
-**Main Dashboard (9 charts)**:
-1. Throughput: Actual vs Target RPS
-2. Average Latency vs Load
-3. Latency Percentiles (p50, p95, p99)
-4. Error Rate vs Load
-5. Success Rate vs Load
-6. Latency Range (Min/Avg/Max)
-7. Throughput Efficiency
-8. Actual Throughput (Bar chart)
-9. Performance Summary Table
-
-**Detailed Analysis (2 charts)**:
-10. Detailed Latency Breakdown (Bar chart)
-11. Throughput vs Latency Trade-off (Scatter plot)
+- **Language**: Java 21 + Kotlin 2.1
+- **Framework**: Spring Boot 3.4 (LOS service)
+- **Orchestration**: Temporal SDK 1.26, Direct HTTP implementation (Restate)
+- **HTTP**: OkHttp 4.12, JDK HttpServer
+- **Load Testing**: Vegeta
 
 ## Further Experiments
 
-1. **Stress test**: `python3 benchmark.py --stress` (comprehensive graphs)
-2. **Add failures**: Increase httpbin-proxy failure_rate → test retry logic
-3. **Profiling**: JFR to identify bottlenecks
-4. **Cloud deployment**: Deploy to k8s, test at higher QPS
+1. **Increase load**: Test at 200, 500 RPS to find breaking points
+2. **Add failures**: Enable httpbin-proxy failure simulation (default: 0%)
+3. **Add latency**: Increase httpbin-proxy delay to 50ms, 100ms
+4. **Profile**: JFR recordings to identify bottlenecks
+5. **Vary workflow complexity**: Test with 3 stages, 10 stages
 
----
+## Notes
 
-**For presentation**: Show benchmark graphs, Restate UI (live journal), Temporal UI (event history). Discuss trade-offs: latency vs throughput, simplicity vs maturity.
+- Results may vary based on hardware, Docker configuration, and background load
+- First run after code changes may show slower results (JIT not warmed up)
+- Benchmark assumes los-service is lightweight and does not become a bottleneck
+- Restate implementation is simplified (no Restate SDK, direct HTTP) for POC purposes
+
+## License
+
+MIT

@@ -1,0 +1,11 @@
+{
+  "productId": "personal_loan",
+  "userDetails": {
+    "emiratesId": "784-1234-5678901-0",
+    "name": "Ahmed Test",
+    "dateOfBirth": "1990-01-01",
+    "address": "Dubai, UAE",
+    "incomeClaimed": 15000
+  },
+  "loanAmount": 50000
+}

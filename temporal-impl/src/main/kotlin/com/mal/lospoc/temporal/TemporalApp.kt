@@ -2,25 +2,31 @@ package com.mal.lospoc.temporal
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.mal.lospoc.common.domain.LoanProductConfig
 import com.mal.lospoc.common.dto.UserDetails
 import com.mal.lospoc.temporal.workflow.CreditCheckRequest
 import com.mal.lospoc.temporal.workflow.CreditCheckWorkflow
 import com.mal.lospoc.temporal.workflow.CreditCheckWorkflowImpl
+import com.mal.lospoc.temporal.workflow.WorkflowResult
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.temporal.serviceclient.WorkflowServiceStubs
 import io.temporal.worker.WorkerFactory
+import io.temporal.worker.WorkerOptions
 import java.math.BigDecimal
 import java.net.InetSocketAddress
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 const val TASK_QUEUE = "CREDIT_CHECK_QUEUE"
-private val json = ObjectMapper().registerModule(JavaTimeModule())
+private val json = ObjectMapper()
+    .registerModule(JavaTimeModule())
+    .registerKotlinModule()
 private const val LOS_URL = "http://localhost:8000"
 private const val HTTPBIN_URL = "http://localhost:8091"
 
@@ -35,13 +41,19 @@ fun main() {
     val client = WorkflowClient.newInstance(service)
     val factory = WorkerFactory.newInstance(client)
 
-    val worker = factory.newWorker(TASK_QUEUE)
+    // Worker tuning for high throughput
+    val workerOptions = WorkerOptions.newBuilder()
+        .setMaxConcurrentWorkflowTaskExecutionSize(500)
+        .setMaxConcurrentActivityExecutionSize(500)
+        .build()
+
+    val worker = factory.newWorker(TASK_QUEUE, workerOptions)
     worker.registerWorkflowImplementationTypes(CreditCheckWorkflowImpl::class.java)
     worker.registerActivitiesImplementations(CreditCheckWorkflowImpl.ActivitiesImpl())
 
     factory.start()
 
-    val server = HttpServer.create(InetSocketAddress(8001), 1000)
+    val server = HttpServer.create(InetSocketAddress(9001), 0)
 
     server.createContext("/") { exchange ->
         if (exchange.requestMethod == "GET") {
@@ -69,28 +81,59 @@ fun main() {
                 WorkflowOptions.newBuilder()
                     .setTaskQueue(TASK_QUEUE)
                     .setWorkflowId("credit-check-$appId")
+                    .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
                     .build()
             )
 
             val workflowReq = CreditCheckRequest(
-                appId, req.productId, req.userDetails, config, HTTPBIN_URL, LOS_URL
+                appId, req.productId, req.userDetails, req.loanAmount, config, HTTPBIN_URL, LOS_URL
             )
 
-            WorkflowClient.start(workflow::run, workflowReq)
+            // Synchronous execution - blocks until workflow completes
+            val result = try {
+                workflow.run(workflowReq)
+            } catch (e: Exception) {
+                if (e.message?.contains("timeout", ignoreCase = true) == true) {
+                    WorkflowResult(status = "timeout", decisionReason = "Workflow timeout after 30 seconds")
+                } else {
+                    WorkflowResult(status = "failed", decisionReason = e.message ?: "Workflow execution failed")
+                }
+            }
 
-            sendResponse(exchange, 200, mapOf(
-                "applicationId" to appId.toString(),
-                "status" to "submitted"
-            ))
+            // Map result to HTTP response
+            when (result.status) {
+                "approved" -> sendResponse(exchange, 200, mapOf(
+                    "applicationId" to appId.toString(),
+                    "status" to "approved",
+                    "approvedAmount" to result.approvedAmount.toString(),
+                    "decisionReason" to result.decisionReason
+                ))
+                "rejected" -> sendResponse(exchange, 200, mapOf(
+                    "applicationId" to appId.toString(),
+                    "status" to "rejected",
+                    "decisionReason" to result.decisionReason
+                ))
+                "timeout" -> sendResponse(exchange, 504, mapOf(
+                    "applicationId" to appId.toString(),
+                    "error" to "Gateway Timeout",
+                    "message" to result.decisionReason
+                ))
+                else -> sendResponse(exchange, 500, mapOf(
+                    "applicationId" to appId.toString(),
+                    "error" to "Internal Server Error",
+                    "message" to result.decisionReason
+                ))
+            }
         } catch (e: Exception) {
-            sendResponse(exchange, 500, mapOf("error" to e.message))
+            sendResponse(exchange, 500, mapOf("error" to (e.message ?: "Unknown error")))
         }
     }
 
     server.executor = Executors.newFixedThreadPool(100)
     server.start()
 
-    println("Temporal worker and HTTP server started successfully on port 8001")
+    println("Temporal worker and HTTP server started on port 9001")
+    println("Worker config: maxConcurrentWorkflowTasks=500, maxConcurrentActivityTasks=500")
 }
 
 private fun sendResponse(exchange: HttpExchange, code: Int, body: Any) {
@@ -104,15 +147,33 @@ private fun sendResponse(exchange: HttpExchange, code: Int, body: Any) {
 
 private fun createDefaultConfig(productId: String): LoanProductConfig {
     val enabled = LoanProductConfig.StageConfig(true, 30, 3)
+    val disabled = LoanProductConfig.StageConfig(false, 0, 0)
     val thresholds = LoanProductConfig.DecisionThresholds(700, 500)
 
-    return LoanProductConfig(
-        productId,
-        enabled,
-        enabled,
-        enabled,
-        enabled,
-        thresholds,
-        Duration.ofMinutes(10)
-    )
+    return when (productId) {
+        "auto_loan" -> LoanProductConfig(
+            productId,
+            enabled,  // identityVerification
+            enabled,  // creditBureau
+            enabled,  // openBanking
+            disabled, // employmentVerification
+            enabled,  // amlScreening
+            disabled, // fraudScoring
+            enabled,  // disbursementNotification
+            thresholds,
+            Duration.ofDays(5)
+        )
+        else -> LoanProductConfig(
+            productId,
+            enabled,  // identityVerification
+            enabled,  // creditBureau
+            enabled,  // openBanking
+            enabled,  // employmentVerification
+            enabled,  // amlScreening
+            enabled,  // fraudScoring
+            enabled,  // disbursementNotification
+            thresholds,
+            Duration.ofDays(7)
+        )
+    }
 }

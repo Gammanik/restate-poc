@@ -31,7 +31,9 @@ public class LoanApplicationService {
 
         LoanApplication app = LoanApplication.initiate(productId, userDetails, loanAmount);
         store.save(app);
-        store.appendEvent(app.applicationId(), new ApplicationEvent.Started(productId));
+
+        // Apply Started event to transition to Processing state
+        applyEvent(app.applicationId(), new ApplicationEvent.Started(productId));
 
         log.info("Application submitted: {}", app.applicationId());
         return app.applicationId();
@@ -43,7 +45,7 @@ public class LoanApplicationService {
 
         ApplicationState newState = switch (app.state()) {
             case ApplicationState.Submitted s -> switch (event) {
-                case ApplicationEvent.Started e -> new ApplicationState.Processing("consent");
+                case ApplicationEvent.Started e -> new ApplicationState.Processing("identity_verification");
                 default -> throw invalid(app.state(), event);
             };
             case ApplicationState.Processing p -> switch (event) {
@@ -75,9 +77,12 @@ public class LoanApplicationService {
 
     private String nextStage(String current) {
         return switch (current) {
-            case "consent" -> "aecb";
-            case "aecb" -> "open_banking";
-            case "open_banking" -> "decisioning";
+            case "identity_verification" -> "credit_bureau";
+            case "credit_bureau" -> "open_banking";
+            case "open_banking" -> "employment_verification";
+            case "employment_verification" -> "aml_screening";
+            case "aml_screening" -> "fraud_scoring";
+            case "fraud_scoring" -> "disbursement_notification";
             default -> "decisioning";
         };
     }

@@ -6,16 +6,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/anything/consent-service")
-public class ConsentController {
+@RequestMapping("/aml")
+public class AmlScreeningController {
     private final LatencySimulator latency;
     private final FailureSimulator failure;
+    private final Random random = new Random();
 
     @Value("${simulation.latency_ms:15}")
     private long latencyMs;
@@ -23,22 +23,22 @@ public class ConsentController {
     @Value("${simulation.failure_rate:0.0}")
     private double failureRate;
 
-    public ConsentController(LatencySimulator latency, FailureSimulator failure) {
+    public AmlScreeningController(LatencySimulator latency, FailureSimulator failure) {
         this.latency = latency;
         this.failure = failure;
     }
 
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> captureConsent(@RequestBody Map<String, Object> request) {
-        latency.simulate("consent", latencyMs);
-        failure.maybeThrow("consent", failureRate);
+    @PostMapping("/screen")
+    public ResponseEntity<Map<String, Object>> screen(@RequestBody Map<String, Object> request) {
+        latency.simulate("aml_screening", latencyMs);
+        failure.maybeThrow("aml_screening", failureRate);
 
-        Instant now = Instant.now();
+        String[] results = {"CLEAR", "CLEAR", "CLEAR", "CLEAR", "REVIEW_REQUIRED"};
         return ResponseEntity.ok(Map.of(
-            "consentRecordId", UUID.randomUUID().toString(),
-            "consentTypes", request.getOrDefault("consentType", List.of("AECB", "OpenBanking")),
-            "signedAt", now.toString(),
-            "validUntil", now.plusSeconds(7776000).toString() // 90 days
+            "screeningId", UUID.randomUUID().toString(),
+            "result", results[random.nextInt(results.length)],
+            "riskLevel", "LOW",
+            "matchesFound", 0
         ));
     }
 }
