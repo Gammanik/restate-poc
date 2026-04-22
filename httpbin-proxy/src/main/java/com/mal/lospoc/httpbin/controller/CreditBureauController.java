@@ -10,27 +10,27 @@ import java.util.Map;
 import java.util.Random;
 
 @RestController
-@RequestMapping("/delay")
-public class AecbController {
+@RequestMapping("/credit-bureau")
+public class CreditBureauController {
     private final LatencySimulator latency;
     private final FailureSimulator failure;
     private final Random random = new Random();
 
-    @Value("${simulation.failure_rate.aecb:0.10}")
+    @Value("${simulation.latency_ms:15}")
+    private long latencyMs;
+
+    @Value("${simulation.failure_rate:0.0}")
     private double failureRate;
 
-    public AecbController(LatencySimulator latency, FailureSimulator failure) {
+    public CreditBureauController(LatencySimulator latency, FailureSimulator failure) {
         this.latency = latency;
         this.failure = failure;
     }
 
-    @PostMapping("/{seconds}")
-    public ResponseEntity<Map<String, Object>> fetchAecb(
-        @PathVariable int seconds,
-        @RequestBody Map<String, Object> request
-    ) {
-        latency.simulate("aecb", seconds * 1000L);
-        failure.maybeThrow("aecb", failureRate);
+    @PostMapping("/report")
+    public ResponseEntity<Map<String, Object>> fetchReport(@RequestBody Map<String, Object> request) {
+        latency.simulate("credit_bureau", latencyMs);
+        failure.maybeThrow("credit_bureau", failureRate);
 
         int score = 300 + random.nextInt(551); // 300-850
         return ResponseEntity.ok(Map.of(

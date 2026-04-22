@@ -4,10 +4,13 @@ import java.time.Duration;
 
 public record LoanProductConfig(
     String productId,
-    StageConfig consent,
-    StageConfig aecb,
+    StageConfig identityVerification,
+    StageConfig creditBureau,
     StageConfig openBanking,
-    StageConfig decisioning,
+    StageConfig employmentVerification,
+    StageConfig amlScreening,
+    StageConfig fraudScoring,
+    StageConfig disbursementNotification,
     DecisionThresholds decision,
     Duration underwritingSla
 ) {

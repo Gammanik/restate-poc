@@ -42,5 +42,12 @@ bin/
 *.log
 comparison/stress-results.md
 
+### Benchmark results ###
+results/
+*.bin
+benchmark-results.csv
+benchmark-stress-results.csv
+benchmark-graph-latest.png
+
 ### Kotlin (generated code) ###
 .kotlin/

@@ -8,10 +8,11 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("/anything/decision-engine")
-public class DecisionEngineController {
+@RequestMapping("/fraud")
+public class FraudScoringController {
     private final LatencySimulator latency;
     private final FailureSimulator failure;
     private final Random random = new Random();
@@ -22,29 +23,31 @@ public class DecisionEngineController {
     @Value("${simulation.failure_rate:0.0}")
     private double failureRate;
 
-    public DecisionEngineController(LatencySimulator latency, FailureSimulator failure) {
+    public FraudScoringController(LatencySimulator latency, FailureSimulator failure) {
         this.latency = latency;
         this.failure = failure;
     }
 
-    @PostMapping
+    @PostMapping("/score")
     public ResponseEntity<Map<String, Object>> score(@RequestBody Map<String, Object> request) {
-        latency.simulate("decision_engine", latencyMs);
-        failure.maybeThrow("decision_engine", failureRate);
+        latency.simulate("fraud_scoring", latencyMs);
+        failure.maybeThrow("fraud_scoring", failureRate);
 
-        int score = random.nextInt(1001); // 0-1000
-        String outcome;
-        if (score >= 700) {
-            outcome = "AUTO_APPROVE";
-        } else if (score >= 500) {
-            outcome = "MANUAL";
+        int score = random.nextInt(101); // 0-100
+        String riskLevel;
+        if (score >= 80) {
+            riskLevel = "LOW";
+        } else if (score >= 50) {
+            riskLevel = "MEDIUM";
         } else {
-            outcome = "AUTO_REJECT";
+            riskLevel = "HIGH";
         }
 
         return ResponseEntity.ok(Map.of(
-            "score", score,
-            "outcome", outcome
+            "fraudCheckId", UUID.randomUUID().toString(),
+            "fraudScore", score,
+            "riskLevel", riskLevel,
+            "flagsRaised", score < 50 ? random.nextInt(3) + 1 : 0
         ));
     }
 }

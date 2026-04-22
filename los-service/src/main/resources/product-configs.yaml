@@ -1,11 +1,11 @@
 products:
   personal_loan:
     stages:
-      consent:
+      identity_verification:
         enabled: true
-        timeout_seconds: 5
+        timeout_seconds: 10
         retries: 3
-      aecb:
+      credit_bureau:
         enabled: true
         timeout_seconds: 15
         retries: 5
@@ -13,10 +13,22 @@ products:
         enabled: true
         timeout_seconds: 20
         retries: 3
-      decisioning:
+      employment_verification:
         enabled: true
-        timeout_seconds: 5
+        timeout_seconds: 10
+        retries: 3
+      aml_screening:
+        enabled: true
+        timeout_seconds: 15
+        retries: 3
+      fraud_scoring:
+        enabled: true
+        timeout_seconds: 10
         retries: 2
+      disbursement_notification:
+        enabled: true
+        timeout_seconds: 10
+        retries: 3
     decision:
       auto_approve_score: 700
       auto_reject_score: 500
@@ -24,22 +36,34 @@ products:
 
   auto_loan:
     stages:
-      consent:
+      identity_verification:
         enabled: true
-        timeout_seconds: 5
+        timeout_seconds: 10
         retries: 3
-      aecb:
+      credit_bureau:
         enabled: true
         timeout_seconds: 15
         retries: 5
       open_banking:
+        enabled: true
+        timeout_seconds: 20
+        retries: 3
+      employment_verification:
         enabled: false
         timeout_seconds: 0
         retries: 0
-      decisioning:
+      aml_screening:
         enabled: true
-        timeout_seconds: 5
-        retries: 2
+        timeout_seconds: 15
+        retries: 3
+      fraud_scoring:
+        enabled: false
+        timeout_seconds: 0
+        retries: 0
+      disbursement_notification:
+        enabled: true
+        timeout_seconds: 10
+        retries: 3
     decision:
       auto_approve_score: 650
       auto_reject_score: 450
@@ -47,11 +71,11 @@ products:
 
   mortgage:
     stages:
-      consent:
+      identity_verification:
         enabled: true
-        timeout_seconds: 5
+        timeout_seconds: 10
         retries: 3
-      aecb:
+      credit_bureau:
         enabled: true
         timeout_seconds: 30
         retries: 5
@@ -59,7 +83,19 @@ products:
         enabled: true
         timeout_seconds: 45
         retries: 5
-      decisioning:
+      employment_verification:
+        enabled: true
+        timeout_seconds: 15
+        retries: 3
+      aml_screening:
+        enabled: true
+        timeout_seconds: 20
+        retries: 3
+      fraud_scoring:
+        enabled: true
+        timeout_seconds: 15
+        retries: 2
+      disbursement_notification:
         enabled: true
         timeout_seconds: 10
         retries: 3

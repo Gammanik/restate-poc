@@ -8,10 +8,11 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("/anything/open-banking")
-public class OpenBankingController {
+@RequestMapping("/emirates-id")
+public class IdentityVerificationController {
     private final LatencySimulator latency;
     private final FailureSimulator failure;
     private final Random random = new Random();
@@ -22,22 +23,22 @@ public class OpenBankingController {
     @Value("${simulation.failure_rate:0.0}")
     private double failureRate;
 
-    public OpenBankingController(LatencySimulator latency, FailureSimulator failure) {
+    public IdentityVerificationController(LatencySimulator latency, FailureSimulator failure) {
         this.latency = latency;
         this.failure = failure;
     }
 
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> snapshot(@RequestBody Map<String, Object> request) {
-        latency.simulate("open_banking", latencyMs);
-        failure.maybeThrow("open_banking", failureRate);
+    @PostMapping("/verify")
+    public ResponseEntity<Map<String, Object>> verify(@RequestBody Map<String, Object> request) {
+        latency.simulate("identity_verification", latencyMs);
+        failure.maybeThrow("identity_verification", failureRate);
 
-        String[] consistencies = {"CONSISTENT", "VARIABLE", "IRREGULAR"};
+        String[] statuses = {"VERIFIED", "VERIFIED", "VERIFIED", "PENDING"};
         return ResponseEntity.ok(Map.of(
-            "monthlyIncome", 5000 + random.nextInt(15000),
-            "avgBalance", 1000 + random.nextInt(50000),
-            "monthlyExpenses", 2000 + random.nextInt(8000),
-            "salaryConsistency", consistencies[random.nextInt(consistencies.length)]
+            "verificationId", UUID.randomUUID().toString(),
+            "status", statuses[random.nextInt(statuses.length)],
+            "matchScore", 85 + random.nextInt(16), // 85-100
+            "emiratesId", request.getOrDefault("emiratesId", "unknown")
         ));
     }
 }

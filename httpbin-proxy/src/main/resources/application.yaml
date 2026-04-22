@@ -6,16 +6,10 @@ spring:
     name: httpbin-proxy
 
 simulation:
-  latency:
-    consent: 100
-    aecb: 2000
-    open_banking: 500
-    decision_engine: 200
-  failure_rate:
-    consent: 0.05
-    aecb: 0.10
-    open_banking: 0.05
-    decision_engine: 0.02
+  # Deterministic 15ms delay for all endpoints (fair benchmark)
+  latency_ms: 15
+  # Disable failures for benchmark (can be re-enabled for failure testing)
+  failure_rate: 0.0
 
 logging:
   level:

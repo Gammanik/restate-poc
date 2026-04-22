@@ -54,10 +54,13 @@ public class ProductConfigLoader {
 
         return new LoanProductConfig(
             productId,
-            parseStage((Map<String, Object>) stages.get("consent")),
-            parseStage((Map<String, Object>) stages.get("aecb")),
+            parseStage((Map<String, Object>) stages.get("identity_verification")),
+            parseStage((Map<String, Object>) stages.get("credit_bureau")),
             parseStage((Map<String, Object>) stages.get("open_banking")),
-            parseStage((Map<String, Object>) stages.get("decisioning")),
+            parseStage((Map<String, Object>) stages.get("employment_verification")),
+            parseStage((Map<String, Object>) stages.get("aml_screening")),
+            parseStage((Map<String, Object>) stages.get("fraud_scoring")),
+            parseStage((Map<String, Object>) stages.get("disbursement_notification")),
             new LoanProductConfig.DecisionThresholds(
                 (int) decision.get("auto_approve_score"),
                 (int) decision.get("auto_reject_score")
