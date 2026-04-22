@@ -49,11 +49,12 @@ fun main() {
 
     val worker = factory.newWorker(TASK_QUEUE, workerOptions)
     worker.registerWorkflowImplementationTypes(CreditCheckWorkflowImpl::class.java)
-    worker.registerActivitiesImplementations(CreditCheckWorkflowImpl.ActivitiesImpl())
+    worker.registerActivitiesImplementations(CreditCheckWorkflowImpl.ActivitiesImpl(HTTPBIN_URL, LOS_URL))
 
     factory.start()
 
-    val server = HttpServer.create(InetSocketAddress(9002), 0)
+    // Increase backlog queue size for high RPS (default 0 = system default ~50)
+    val server = HttpServer.create(InetSocketAddress(9002), 1000)
 
     server.createContext("/") { exchange ->
         if (exchange.requestMethod == "GET") {
@@ -83,7 +84,8 @@ fun main() {
                 WorkflowOptions.newBuilder()
                     .setTaskQueue(TASK_QUEUE)
                     .setWorkflowId(workflowId)
-                    .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
+                    .setWorkflowExecutionTimeout(Duration.ofSeconds(120))
+                    .setWorkflowTaskTimeout(Duration.ofSeconds(10))
                     .build()
             )
 
@@ -131,7 +133,10 @@ fun main() {
         }
     }
 
-    server.executor = Executors.newFixedThreadPool(100)
+    // Use larger thread pool to handle high concurrency at 50+ RPS
+    // At 50 RPS with ~200ms avg latency, need ~10 threads minimum
+    // Using 500 to match worker concurrency and handle spikes
+    server.executor = Executors.newFixedThreadPool(500)
     server.start()
 
     println("Temporal worker and HTTP server started on port 9002")

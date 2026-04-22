@@ -13,11 +13,11 @@ WARMUP=${4:-30}
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 RESULTS_DIR="results/${TIMESTAMP}-${ENGINE}-${RPS}rps"
 
-# Engine-specific URLs
+# Engine-specific URLs (use 127.0.0.1 for vegeta DNS compatibility)
 if [ "$ENGINE" = "restate" ]; then
-    URL="http://localhost:9000/api/applications"
+    URL="http://127.0.0.1:9000/api/applications"
 elif [ "$ENGINE" = "temporal" ]; then
-    URL="http://localhost:9002/api/applications"
+    URL="http://127.0.0.1:9002/api/applications"
 else
     echo "Error: Unknown engine '$ENGINE'. Use 'restate' or 'temporal'"
     exit 1
@@ -34,6 +34,17 @@ fi
 if [ ! -f "payload.json" ]; then
     echo "Error: payload.json not found in current directory"
     exit 1
+fi
+
+# Check macOS ephemeral port range (only on Darwin)
+if [ "$(uname)" = "Darwin" ]; then
+    CURRENT_FIRST=$(sysctl -n net.inet.ip.portrange.first 2>/dev/null || echo "10000")
+    if [ "$CURRENT_FIRST" -gt 10000 ]; then
+        echo "⚠️  Port range starts at $CURRENT_FIRST (too narrow for high RPS)"
+        echo "   Run: sudo sysctl -w net.inet.ip.portrange.first=10000"
+        echo "   Continuing anyway, expect port exhaustion errors..."
+        echo ""
+    fi
 fi
 
 mkdir -p "$RESULTS_DIR"

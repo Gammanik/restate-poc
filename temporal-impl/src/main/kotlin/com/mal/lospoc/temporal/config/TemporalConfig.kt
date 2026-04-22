@@ -23,7 +23,9 @@ import org.springframework.context.event.EventListener
 @Configuration
 class TemporalConfig(
     @Value("\${temporal.server-url}") private val serverUrl: String,
-    @Value("\${temporal.task-queue}") private val taskQueue: String
+    @Value("\${temporal.task-queue}") private val taskQueue: String,
+    @Value("\${temporal.httpbin-url}") private val httpbinUrl: String,
+    @Value("\${temporal.los-url}") private val losUrl: String
 ) {
 
     private lateinit var service: WorkflowServiceStubs
@@ -66,7 +68,7 @@ class TemporalConfig(
 
         val worker: Worker = factory.newWorker(taskQueue, workerOptions)
         worker.registerWorkflowImplementationTypes(CreditCheckWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(CreditCheckWorkflowImpl.ActivitiesImpl())
+        worker.registerActivitiesImplementations(CreditCheckWorkflowImpl.ActivitiesImpl(httpbinUrl, losUrl))
 
         factory.start()
         println("Temporal worker started on queue: $taskQueue")

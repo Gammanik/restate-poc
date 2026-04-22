@@ -135,42 +135,53 @@ All httpbin-proxy endpoints sleep for exactly 15ms via `Thread.sleep(15)`. No ra
 
 ## Benchmark Results
 
-**Hardware**: M1 MacBook Air, 16GB RAM, macOS 15, Docker Desktop 4.x (8 vCPUs, 8GB RAM allocated)
+**Environment**: M1 MacBook Air, 16GB RAM, macOS 15, Docker Desktop 4.x (8 vCPUs, 8GB RAM)
 
 **Date**: 2026-04-22
 
-### Test @ 50 RPS, 60s duration, 30s warmup
+**Important**: These results reflect a local development setup with Docker-based Temporal (Postgres backend), not production Temporal Cloud or optimized on-premise deployment. See "Limitations" section below.
+
+### Restate @ 50 RPS
 
 ```
-Engine     Requests  Success  Latency p50  Latency p95  Latency p99  Throughput
--------------------------------------------------------------------------------
-Restate      3000    100.0%     146.8ms      254.0ms      653.5ms     49.88/s
-Temporal     1892     89.5%    34.630s      59.328s      60.000s     16.68/s
+Requests: 3000
+Success:  100.0%
+Latency:  p50=146.8ms, p95=254.0ms, p99=653.5ms
+Throughput: 49.88/s
+In-flight after drain: 0
 ```
 
-**Temporal Issues**:
-- Only 89.5% success rate (188 timeouts, 34 client deadline errors)
-- Mean latency 34.1s vs 167ms for Restate (204x slower!)
-- 186 requests remained in-flight after 60s drain timeout
-- Throughput collapsed to 16.68 RPS vs 49.88 RPS for Restate
+### Temporal @ Various RPS (After Application-Level Optimizations)
 
-**Analysis**:
+After applying application-level optimizations (HTTP connection pooling, thread pool sizing, timeout tuning), we observed the following results:
 
-**Restate**:
-- Near-theoretical minimum latency: 105ms (7×15ms external) + ~42ms orchestration overhead
-- 100% success rate demonstrates reliability under load
-- p50 of 146.8ms shows consistent performance with journal-based durability
-- Achieved target throughput of 49.88 RPS with zero failures
-- p99 of 653ms indicates occasional GC or warmup overhead
+| RPS | Success Rate | p50 Latency | p90 Latency | p95 Latency | Throughput | In-Flight |
+|-----|--------------|-------------|-------------|-------------|------------|-----------|
+| 50  | 80.68%       | 32.3s       | 60s         | 60s         | 14.70/s    | 216       |
+| 20  | 78.67%       | 7.2s        | 30.1s       | 30.2s       | 10.48/s    | 167       |
+| 15  | 90.44%       | 15.5s       | 29.8s       | 30.1s       | 9.46/s     | 49        |
+| **10**  | **100%**     | **1.5s**    | **8.2s**    | **8.9s**    | **8.88/s** | **0**     |
 
-**Temporal**:
-- Severe performance degradation: 204x slower mean latency than Restate
-- Only 89.5% success rate indicates system overload despite improved from 67.8%
-- 186 requests stuck in-flight suggests worker pool saturation or database bottleneck
-- Despite worker tuning (500 concurrent tasks), could only sustain ~17 RPS effective throughput
-- p50 of 34.6s shows fundamental throughput limitations under load
+### Application-Level Optimizations Applied
 
-The results demonstrate that Restate's lightweight journal-based architecture significantly outperforms Temporal's heavier persistence layer for synchronous workflow execution patterns at even moderate load levels.
+1. **HTTP Client**: Singleton `OkHttpClient` with connection pooling (200 connections, 5min keep-alive)
+2. **HTTP Server Thread Pool**: Increased from 100 to 500 threads
+3. **HTTP Server Backlog Queue**: Increased from default (~50) to 1000
+4. **Workflow Execution Timeout**: Increased from 30s to 120s
+5. **Activity Timeouts**: StartToClose (60s), ScheduleToClose (90s), ScheduleToStart (30s)
+6. **Benchmark URL**: Fixed from `localhost` to `127.0.0.1` for vegeta DNS compatibility
+
+### Observed Results Summary (Local Setup)
+
+| Metric | Restate @ 50 RPS | Temporal @ 10 RPS |
+|--------|------------------|-------------------|
+| Success Rate | 100% | 100% |
+| p50 Latency | 146.8ms | 1,544ms |
+| p95 Latency | 254ms | 8,933ms |
+| p99 Latency | 653ms | 10,865ms |
+| Throughput | 49.88/s | 8.88/s |
+
+**Note**: At 50 RPS, the local Temporal setup showed 80.68% success rate with 216 in-flight workflows remaining after 60s drain period. At 10 RPS, we achieved 100% success rate.
 
 ## Project Structure
 
@@ -274,6 +285,96 @@ WorkerOptions.newBuilder()
 - Benchmark assumes los-service is lightweight and does not become a bottleneck
 - Both implementations use proper SDKs: Restate SDK 2.1.0 with durable journal-based execution, Temporal SDK 1.26.2 with gRPC + PostgreSQL persistence
 - **Restate Implementation**: Uses `@Workflow` annotation (not `@Service`) to ensure workflow invocations are retained in Restate UI after completion, providing UI parity with Temporal for observability and debugging
+
+## What We Measured
+
+This benchmark evaluates Restate and Temporal for a 7-stage UAE loan processing workflow with synchronous HTTP endpoints. Both implementations use identical external HTTP clients, deterministic 15ms delays, and proper SDK usage.
+
+### Methodology Strengths
+
+✅ **Synchronous endpoints** for both (HTTP 200 only after workflow completion)
+✅ **Deterministic 15ms delays** on all external calls (no network jitter)
+✅ **Identical external HTTP client** (shared `WorkflowClient.java`)
+✅ **Proper SDK usage**: Restate SDK 2.1.0, Temporal SDK 1.26.2
+✅ **Worker tuning**: Temporal configured with 500 concurrent workflow/activity slots
+✅ **Application-level optimizations**: HTTP connection pooling, thread pool sizing, timeout tuning
+✅ **Professional tooling**: Vegeta load testing with HDR percentiles
+
+### Observed Behavior in This Setup
+
+**Restate (local single-node)**:
+- Sustained 50 RPS with 100% success rate
+- p50 latency: 147ms (105ms external calls + ~42ms orchestration)
+- p99 latency: 653ms (occasional GC/warmup spikes)
+- Zero in-flight workflows after completion
+
+**Temporal (Docker Postgres backend)**:
+- At 10 RPS: 100% success, p50=1.5s, p95=8.9s
+- At 50 RPS: 80.68% success, p50=32s, 216 workflows stuck in-flight after 60s drain
+- Observed gRPC warnings in logs: "Workflow task not found"
+- Postgres CPU remained low (0.81%), suggesting I/O or lock contention rather than CPU saturation
+
+### Honest Limitations of This POC
+
+**Infrastructure**:
+- Single M1 MacBook, Docker Desktop (not production-grade)
+- Temporal on Docker auto-setup with Postgres (not Cassandra or Temporal Cloud)
+- No distributed deployment testing
+- No infrastructure-level tuning (Postgres config, Docker resources)
+
+**Test Coverage**:
+- Only tested synchronous request/response pattern
+- No crash recovery or failure injection
+- No long-running workflow scenarios (hours/days)
+- Did not measure Restate's upper throughput limit
+- httpbin-proxy and LOS service are shared bottlenecks (not isolated per engine)
+
+**Known Code Issues Not Addressed**:
+- httpbin-proxy uses blocking `Thread.sleep(15)` instead of async delay
+- Postgres uses default Docker configuration (not tuned for writes)
+- No profiling to identify specific bottlenecks in Temporal setup
+
+**Scope**:
+- This POC measures one specific workload pattern on one specific setup
+- Results do not represent production Temporal Cloud performance
+- Temporal's strengths in long-running workflows, audit trails, and ecosystem tooling are not tested
+
+### Trade-offs Observed
+
+**Restate (in this test)**:
+- Low latency for synchronous workflows
+- Simple deployment model (single binary)
+- Good performance out-of-the-box on laptop
+- Limited: smaller ecosystem, newer project, less production battle-testing
+
+**Temporal (in this test)**:
+- Higher latency in local Docker Postgres setup
+- Rich ecosystem and tooling (SDKs, UI, CLI)
+- Proven at scale in production environments (when properly deployed)
+- Excellent for long-running workflows and audit trails
+
+### Recommendations
+
+**Consider Restate when**:
+- Primary workload is synchronous request/response (seconds to minutes)
+- Low latency is critical (sub-200ms p50)
+- Deploying on modern cloud infrastructure
+- Comfortable with newer, smaller ecosystem
+
+**Consider Temporal when**:
+- Long-running workflows (hours to weeks)
+- Need strong audit trail and event replay capabilities
+- Require rich ecosystem (many SDKs, integrations, community support)
+- Proven production track record is important
+
+**Next Steps for Fair Evaluation**:
+1. Test Temporal Cloud or properly tuned on-premise cluster
+2. Tune Postgres for write-heavy workloads
+3. Profile both implementations to identify bottlenecks
+4. Test async workflow patterns (Temporal's sweet spot)
+5. Add failure injection and recovery testing
+6. Measure Restate's throughput ceiling
+7. Test long-running workflow scenarios
 
 ## License
 
