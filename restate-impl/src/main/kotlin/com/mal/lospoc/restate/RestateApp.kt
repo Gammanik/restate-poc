@@ -195,6 +195,7 @@ private fun executeWorkflow(
 private fun sendResponse(exchange: HttpExchange, code: Int, body: Any) {
     val response = json.writeValueAsString(body)
     exchange.responseHeaders["Content-Type"] = "application/json"
+    exchange.responseHeaders["Connection"] = "keep-alive"
     exchange.sendResponseHeaders(code, response.length.toLong())
     exchange.responseBody.use { os ->
         os.write(response.toByteArray())

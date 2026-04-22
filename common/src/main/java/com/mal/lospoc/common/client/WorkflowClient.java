@@ -17,7 +17,16 @@ import java.util.UUID;
  */
 public class WorkflowClient {
     private static final MediaType JSON = MediaType.get("application/json");
-    private final OkHttpClient http = new OkHttpClient();
+
+    // Singleton HTTP client shared across all instances for connection pooling
+    private static final OkHttpClient SHARED_HTTP_CLIENT = new OkHttpClient.Builder()
+        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .connectionPool(new ConnectionPool(200, 5, java.util.concurrent.TimeUnit.MINUTES))
+        .build();
+
+    private final OkHttpClient http = SHARED_HTTP_CLIENT;
     private final ObjectMapper json = new ObjectMapper().registerModule(new JavaTimeModule());
 
     private final String httpbinUrl;

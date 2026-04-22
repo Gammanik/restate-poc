@@ -15,7 +15,6 @@ import java.time.Duration
 import java.util.UUID
 
 data class CreditCheckRequest(
-    val applicationId: UUID,
     val productId: String,
     val userDetails: UserDetails,
     val loanAmount: BigDecimal,
@@ -25,6 +24,7 @@ data class CreditCheckRequest(
 )
 
 data class WorkflowResult(
+    val applicationId: UUID,
     val status: String,
     val approvedAmount: BigDecimal = BigDecimal.ZERO,
     val decisionReason: String = ""
@@ -99,21 +99,25 @@ class CreditCheckWorkflowImpl : CreditCheckWorkflow {
             // Return result
             return when (decision.outcome) {
                 RiskScore.Outcome.AUTO_APPROVE -> WorkflowResult(
+                    applicationId = appId,
                     status = "approved",
                     approvedAmount = req.loanAmount,
                     decisionReason = "Auto-approved with score ${decision.score}"
                 )
                 RiskScore.Outcome.AUTO_REJECT -> WorkflowResult(
+                    applicationId = appId,
                     status = "rejected",
                     decisionReason = "Auto-rejected with score ${decision.score}"
                 )
                 RiskScore.Outcome.MANUAL -> WorkflowResult(
+                    applicationId = appId,
                     status = "rejected",
                     decisionReason = "Manual review required (score ${decision.score})"
                 )
             }
         } catch (e: Exception) {
             return WorkflowResult(
+                applicationId = UUID.randomUUID(), // Fallback ID
                 status = "failed",
                 decisionReason = e.message ?: "Unknown error"
             )

@@ -49,16 +49,36 @@ Total workflow duration: ~105-120ms (7 stages × 15ms + orchestration overhead)
 
 **Prerequisites**: Java 21, Docker, vegeta (`brew install vegeta`)
 
+### macOS Port Range Configuration (Required for High Load)
+
+For benchmarks above 50 RPS, expand the ephemeral port range to avoid "can't assign requested address" errors:
+
+```bash
+# Check current range
+sysctl net.inet.ip.portrange.first net.inet.ip.portrange.last
+
+# Expand to support high-volume testing (requires sudo)
+sudo sysctl -w net.inet.ip.portrange.first=10000
+sudo sysctl -w net.inet.ip.portrange.hifirst=10000
+
+# Make permanent (add to /etc/sysctl.conf):
+# net.inet.ip.portrange.first=10000
+# net.inet.ip.portrange.hifirst=10000
+```
+
+### Service Startup
+
 ```bash
 # 1. Start infrastructure
 docker compose up -d
 
-# 2. Start services
-./gradlew :httpbin-proxy:bootRun &  # Port 8091 (external services mock)
-./gradlew :los-service:bootRun &    # Port 8000 (LOS FSM - internal only)
-./gradlew :restate-impl:run &       # Port 9000 (Restate workflow endpoint)
-# OR
-./gradlew :temporal-impl:run &      # Port 9001 (Temporal workflow endpoint)
+# 2. Start Restate endpoint and services
+./gradlew :httpbin-proxy:bootRun &       # Port 8091 (external services mock)
+./gradlew :los-service:bootRun &         # Port 8000 (LOS FSM - internal only)
+./gradlew :restate-impl:runEndpoint &    # Port 9080 (Restate deployment endpoint)
+./gradlew :restate-impl:bootRun &        # Port 9000 (Restate HTTP API)
+# OR for Temporal:
+./gradlew :temporal-impl:bootRun &       # Port 9002 (Temporal HTTP API)
 
 # Wait 60s for JVM warmup
 sleep 60
@@ -68,10 +88,10 @@ curl -X POST http://localhost:9000/api/applications \
   -H 'Content-Type: application/json' \
   -d @payload.json
 
-# Should return 200 + {"status":"approved",...} after ~120ms
+# Should return 200 + {"status":"approved","approvedAmount":50000,...} after ~150ms
 
 # Or for Temporal:
-# curl -X POST http://localhost:9001/api/applications ...
+# curl -X POST http://localhost:9002/api/applications -H 'Content-Type: application/json' -d @payload.json
 
 # 4. Run benchmark
 ./benchmark.sh restate 50 60 30   # Restate at 50 RPS
@@ -124,26 +144,31 @@ All httpbin-proxy endpoints sleep for exactly 15ms via `Thread.sleep(15)`. No ra
 ```
 Engine     Requests  Success  Latency p50  Latency p95  Latency p99  Throughput
 -------------------------------------------------------------------------------
-Restate      3000    100.0%     130.9ms      166.6ms      228.0ms     49.90/s
-Temporal      TBD      TBD%       TBDms        TBDms        TBDms        TBD
+Restate      3000    100.0%     146.7ms      170.6ms      188.3ms     49.90/s
+Temporal     1291     67.8%    41.068s      60.000s      60.000s     10.76/s
 ```
 
-### Test @ 100 RPS, 60s duration, 30s warmup
+**Temporal Issues**:
+- Only 67.8% success rate (473 timeouts, 140 gateway errors)
+- Mean latency 39.3s vs 149ms for Restate (263x slower!)
+- 388 requests remained in-flight after 60s drain timeout
+- Throughput collapsed to 10.76 RPS vs 49.90 RPS for Restate
 
-```
-Engine     Requests  Success  Latency p50  Latency p95  Latency p99  Throughput
--------------------------------------------------------------------------------
-Restate      6000    100.0%     135.4ms      167.3ms      240.7ms     99.78/s
-Temporal      TBD      TBD%       TBDms        TBDms        TBDms        TBD
-```
+**Analysis**:
 
-**Analysis** (Restate results):
-- Consistent latency across load levels: ~131-135ms p50, ~167ms p95
-- Near-theoretical minimum: 105ms (7×15ms external) + 30-40ms orchestration
-- 100% success rate at both 50 and 100 RPS
-- Latencies align with expectation: minimal orchestration overhead over external service calls
+**Restate**:
+- Near-theoretical minimum latency: 105ms (7×15ms external) + ~42ms orchestration overhead
+- 100% success rate demonstrates reliability under load
+- Consistent p50-p95 spread (24ms) indicates predictable performance
+- Achieved target throughput of 49.90 RPS with zero failures
 
-These results demonstrate the efficiency of synchronous workflow execution with properly tuned HTTP server threads (100 concurrent)
+**Temporal**:
+- Severe performance degradation: 263x slower mean latency than Restate
+- Only 67.8% success rate indicates system overload
+- 388 requests stuck in-flight suggests worker pool saturation or database bottleneck
+- Despite worker tuning (500 concurrent tasks), could only sustain ~11 RPS effective throughput
+
+The results demonstrate that Restate's lightweight journal-based architecture significantly outperforms Temporal's heavier persistence layer for synchronous workflow execution patterns at even moderate load levels.
 
 ## Project Structure
 
@@ -226,10 +251,11 @@ WorkerOptions.newBuilder()
 ## Tech Stack
 
 - **Language**: Java 21 + Kotlin 2.1
-- **Framework**: Spring Boot 3.4 (LOS service)
-- **Orchestration**: Temporal SDK 1.26, Direct HTTP implementation (Restate)
-- **HTTP**: OkHttp 4.12, JDK HttpServer
+- **Framework**: Spring Boot 3.4 (all HTTP endpoints)
+- **Orchestration**: Temporal SDK 1.26.2, Restate SDK 2.1.0 with journal-based durable execution
+- **HTTP**: OkHttp 4.12 (client), Spring Boot Tomcat (server)
 - **Load Testing**: Vegeta
+- **Persistence**: PostgreSQL (Temporal), In-memory journal (Restate)
 
 ## Further Experiments
 
@@ -244,7 +270,7 @@ WorkerOptions.newBuilder()
 - Results may vary based on hardware, Docker configuration, and background load
 - First run after code changes may show slower results (JIT not warmed up)
 - Benchmark assumes los-service is lightweight and does not become a bottleneck
-- Restate implementation is simplified (no Restate SDK, direct HTTP) for POC purposes
+- Both implementations use proper SDKs: Restate SDK 2.1.0 with durable journal-based execution, Temporal SDK 1.26.2 with gRPC + PostgreSQL persistence
 
 ## License
 

@@ -53,7 +53,7 @@ fun main() {
 
     factory.start()
 
-    val server = HttpServer.create(InetSocketAddress(9001), 0)
+    val server = HttpServer.create(InetSocketAddress(9002), 0)
 
     server.createContext("/") { exchange ->
         if (exchange.requestMethod == "GET") {
@@ -73,20 +73,22 @@ fun main() {
             val body = exchange.requestBody.readAllBytes().decodeToString()
             val req = json.readValue(body, SubmitRequest::class.java)
 
-            val appId = UUID.randomUUID()
             val config = createDefaultConfig(req.productId)
+
+            // Generate unique workflow ID with timestamp to avoid conflicts at high RPS
+            val workflowId = "credit-check-${UUID.randomUUID()}-${System.nanoTime()}"
 
             val workflow = client.newWorkflowStub(
                 CreditCheckWorkflow::class.java,
                 WorkflowOptions.newBuilder()
                     .setTaskQueue(TASK_QUEUE)
-                    .setWorkflowId("credit-check-$appId")
+                    .setWorkflowId(workflowId)
                     .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
                     .build()
             )
 
             val workflowReq = CreditCheckRequest(
-                appId, req.productId, req.userDetails, req.loanAmount, config, HTTPBIN_URL, LOS_URL
+                req.productId, req.userDetails, req.loanAmount, config, HTTPBIN_URL, LOS_URL
             )
 
             // Synchronous execution - blocks until workflow completes
@@ -94,32 +96,32 @@ fun main() {
                 workflow.run(workflowReq)
             } catch (e: Exception) {
                 if (e.message?.contains("timeout", ignoreCase = true) == true) {
-                    WorkflowResult(status = "timeout", decisionReason = "Workflow timeout after 30 seconds")
+                    WorkflowResult(applicationId = UUID.randomUUID(), status = "timeout", decisionReason = "Workflow timeout after 30 seconds")
                 } else {
-                    WorkflowResult(status = "failed", decisionReason = e.message ?: "Workflow execution failed")
+                    WorkflowResult(applicationId = UUID.randomUUID(), status = "failed", decisionReason = e.message ?: "Workflow execution failed")
                 }
             }
 
             // Map result to HTTP response
             when (result.status) {
                 "approved" -> sendResponse(exchange, 200, mapOf(
-                    "applicationId" to appId.toString(),
+                    "applicationId" to result.applicationId.toString(),
                     "status" to "approved",
                     "approvedAmount" to result.approvedAmount.toString(),
                     "decisionReason" to result.decisionReason
                 ))
                 "rejected" -> sendResponse(exchange, 200, mapOf(
-                    "applicationId" to appId.toString(),
+                    "applicationId" to result.applicationId.toString(),
                     "status" to "rejected",
                     "decisionReason" to result.decisionReason
                 ))
                 "timeout" -> sendResponse(exchange, 504, mapOf(
-                    "applicationId" to appId.toString(),
+                    "applicationId" to result.applicationId.toString(),
                     "error" to "Gateway Timeout",
                     "message" to result.decisionReason
                 ))
                 else -> sendResponse(exchange, 500, mapOf(
-                    "applicationId" to appId.toString(),
+                    "applicationId" to result.applicationId.toString(),
                     "error" to "Internal Server Error",
                     "message" to result.decisionReason
                 ))
@@ -132,13 +134,14 @@ fun main() {
     server.executor = Executors.newFixedThreadPool(100)
     server.start()
 
-    println("Temporal worker and HTTP server started on port 9001")
+    println("Temporal worker and HTTP server started on port 9002")
     println("Worker config: maxConcurrentWorkflowTasks=500, maxConcurrentActivityTasks=500")
 }
 
 private fun sendResponse(exchange: HttpExchange, code: Int, body: Any) {
     val response = json.writeValueAsString(body)
     exchange.responseHeaders["Content-Type"] = "application/json"
+    exchange.responseHeaders["Connection"] = "keep-alive"
     exchange.sendResponseHeaders(code, response.length.toLong())
     exchange.responseBody.use { os ->
         os.write(response.toByteArray())

@@ -20,10 +20,12 @@ public class LoanApplicationService {
 
     private final InMemoryApplicationStore store;
     private final ProductConfigLoader configLoader;
+    private final ApplicationStatsService statsService;
 
-    public LoanApplicationService(InMemoryApplicationStore store, ProductConfigLoader configLoader) {
+    public LoanApplicationService(InMemoryApplicationStore store, ProductConfigLoader configLoader, ApplicationStatsService statsService) {
         this.store = store;
         this.configLoader = configLoader;
+        this.statsService = statsService;
     }
 
     public UUID submit(String productId, UserDetails userDetails, BigDecimal loanAmount) {
@@ -35,6 +37,7 @@ public class LoanApplicationService {
         // Apply Started event to transition to Processing state
         applyEvent(app.applicationId(), new ApplicationEvent.Started(productId));
 
+        statsService.incrementSubmitted();
         log.info("Application submitted: {}", app.applicationId());
         return app.applicationId();
     }
@@ -50,12 +53,18 @@ public class LoanApplicationService {
             };
             case ApplicationState.Processing p -> switch (event) {
                 case ApplicationEvent.StageCompleted e -> new ApplicationState.Processing(nextStage(e.stage()));
-                case ApplicationEvent.DecisionMade e when e.score().outcome() == com.mal.lospoc.common.dto.RiskScore.Outcome.MANUAL ->
-                    new ApplicationState.ManualReview(Instant.now());
-                case ApplicationEvent.DecisionMade e when e.score().outcome() == com.mal.lospoc.common.dto.RiskScore.Outcome.AUTO_APPROVE ->
-                    new ApplicationState.Approved(e.score().score(), Instant.now());
-                case ApplicationEvent.DecisionMade e ->
-                    new ApplicationState.Rejected("Score too low", Instant.now());
+                case ApplicationEvent.DecisionMade e when e.score().outcome() == com.mal.lospoc.common.dto.RiskScore.Outcome.MANUAL -> {
+                    statsService.incrementRejected(); // Manual review counts as rejected for now
+                    yield new ApplicationState.ManualReview(Instant.now());
+                }
+                case ApplicationEvent.DecisionMade e when e.score().outcome() == com.mal.lospoc.common.dto.RiskScore.Outcome.AUTO_APPROVE -> {
+                    statsService.incrementApproved();
+                    yield new ApplicationState.Approved(e.score().score(), Instant.now());
+                }
+                case ApplicationEvent.DecisionMade e -> {
+                    statsService.incrementRejected();
+                    yield new ApplicationState.Rejected("Score too low", Instant.now());
+                }
                 default -> throw invalid(app.state(), event);
             };
             case ApplicationState.ManualReview m -> switch (event) {

@@ -47,3 +47,16 @@ echo "========================================="
 echo "Detailed results:"
 echo "  Restate:  $RESTATE_RESULTS"
 echo "  Temporal: $TEMPORAL_RESULTS"
+echo ""
+
+# Generate comparison plot
+PLOT_OUTPUT="results/comparison-${RPS}rps-$(date +%Y%m%d-%H%M%S).png"
+echo "--- Generating comparison plot ---"
+if command -v python3 &> /dev/null; then
+    chmod +x plot-compare.py 2>/dev/null || true
+    python3 plot-compare.py "$RESTATE_RESULTS/raw.bin" "$TEMPORAL_RESULTS/raw.bin" "$PLOT_OUTPUT"
+    echo "Plot saved to: $PLOT_OUTPUT"
+else
+    echo "⚠️  Python3 not found, skipping plot generation"
+    echo "Install matplotlib to enable plots: pip3 install matplotlib"
+fi

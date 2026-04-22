@@ -1,0 +1,19 @@
+server:
+  port: 9000
+  tomcat:
+    keep-alive-timeout: 60000
+    max-keep-alive-requests: -1
+    threads:
+      max: 400
+      min-spare: 50
+    accept-count: 200
+  connection-timeout: 60000
+
+spring:
+  application:
+    name: restate-impl
+
+restate:
+  ingress-url: http://localhost:8080
+  los-url: http://localhost:8000
+  httpbin-url: http://localhost:8091
