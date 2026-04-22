@@ -144,29 +144,31 @@ All httpbin-proxy endpoints sleep for exactly 15ms via `Thread.sleep(15)`. No ra
 ```
 Engine     Requests  Success  Latency p50  Latency p95  Latency p99  Throughput
 -------------------------------------------------------------------------------
-Restate      3000    100.0%     146.7ms      170.6ms      188.3ms     49.90/s
-Temporal     1291     67.8%    41.068s      60.000s      60.000s     10.76/s
+Restate      3000    100.0%     146.8ms      254.0ms      653.5ms     49.88/s
+Temporal     1892     89.5%    34.630s      59.328s      60.000s     16.68/s
 ```
 
 **Temporal Issues**:
-- Only 67.8% success rate (473 timeouts, 140 gateway errors)
-- Mean latency 39.3s vs 149ms for Restate (263x slower!)
-- 388 requests remained in-flight after 60s drain timeout
-- Throughput collapsed to 10.76 RPS vs 49.90 RPS for Restate
+- Only 89.5% success rate (188 timeouts, 34 client deadline errors)
+- Mean latency 34.1s vs 167ms for Restate (204x slower!)
+- 186 requests remained in-flight after 60s drain timeout
+- Throughput collapsed to 16.68 RPS vs 49.88 RPS for Restate
 
 **Analysis**:
 
 **Restate**:
 - Near-theoretical minimum latency: 105ms (7×15ms external) + ~42ms orchestration overhead
 - 100% success rate demonstrates reliability under load
-- Consistent p50-p95 spread (24ms) indicates predictable performance
-- Achieved target throughput of 49.90 RPS with zero failures
+- p50 of 146.8ms shows consistent performance with journal-based durability
+- Achieved target throughput of 49.88 RPS with zero failures
+- p99 of 653ms indicates occasional GC or warmup overhead
 
 **Temporal**:
-- Severe performance degradation: 263x slower mean latency than Restate
-- Only 67.8% success rate indicates system overload
-- 388 requests stuck in-flight suggests worker pool saturation or database bottleneck
-- Despite worker tuning (500 concurrent tasks), could only sustain ~11 RPS effective throughput
+- Severe performance degradation: 204x slower mean latency than Restate
+- Only 89.5% success rate indicates system overload despite improved from 67.8%
+- 186 requests stuck in-flight suggests worker pool saturation or database bottleneck
+- Despite worker tuning (500 concurrent tasks), could only sustain ~17 RPS effective throughput
+- p50 of 34.6s shows fundamental throughput limitations under load
 
 The results demonstrate that Restate's lightweight journal-based architecture significantly outperforms Temporal's heavier persistence layer for synchronous workflow execution patterns at even moderate load levels.
 
@@ -271,6 +273,7 @@ WorkerOptions.newBuilder()
 - First run after code changes may show slower results (JIT not warmed up)
 - Benchmark assumes los-service is lightweight and does not become a bottleneck
 - Both implementations use proper SDKs: Restate SDK 2.1.0 with durable journal-based execution, Temporal SDK 1.26.2 with gRPC + PostgreSQL persistence
+- **Restate Implementation**: Uses `@Workflow` annotation (not `@Service`) to ensure workflow invocations are retained in Restate UI after completion, providing UI parity with Temporal for observability and debugging
 
 ## License
 

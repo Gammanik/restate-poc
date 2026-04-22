@@ -9,11 +9,11 @@ import com.mal.lospoc.common.dto.OpenBankingSnapshot
 import com.mal.lospoc.common.dto.FraudScore
 import com.mal.lospoc.common.dto.RiskScore
 import com.mal.lospoc.common.dto.UserDetails
-import dev.restate.sdk.Context
-import dev.restate.sdk.annotation.Handler
-import dev.restate.sdk.annotation.Service
+import dev.restate.sdk.WorkflowContext
+import dev.restate.sdk.annotation.Workflow
 import dev.restate.sdk.serde.jackson.JacksonSerdes
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 data class LoanApplicationRequest(
@@ -32,7 +32,7 @@ data class LoanApplicationResult(
     val decisionReason: String = ""
 )
 
-@Service
+@Workflow
 class LoanApplicationService {
 
     companion object {
@@ -42,11 +42,24 @@ class LoanApplicationService {
         private val FRAUD_SCORE_SERDE = JacksonSerdes.of(FraudScore::class.java)
         private val RISK_SCORE_SERDE = JacksonSerdes.of(RiskScore::class.java)
         private val UUID_SERDE = JacksonSerdes.of(UUID::class.java)
+
+        // Cache for WorkflowClient instances to avoid creating new instances per workflow run
+        private val clientCache = mutableMapOf<Pair<String, String>, WorkflowClient>()
+
+        private fun getOrCreateClient(httpbinUrl: String, losUrl: String): WorkflowClient {
+            return clientCache.getOrPut(Pair(httpbinUrl, losUrl)) {
+                WorkflowClient(httpbinUrl, losUrl)
+            }
+        }
     }
 
-    @Handler
-    fun process(ctx: Context, request: LoanApplicationRequest): LoanApplicationResult {
-        val client = WorkflowClient(request.httpbinUrl, request.losUrl)
+    @Workflow
+    fun run(ctx: WorkflowContext, request: LoanApplicationRequest): LoanApplicationResult {
+        val workflowId = "${request.productId}-${request.userDetails.emiratesId}"
+        println("[${Instant.now()}] LoanApplicationWorkflow.run() START - workflowId=$workflowId")
+
+        // Get or create cached WorkflowClient (singleton per httpbinUrl/losUrl pair)
+        val client = getOrCreateClient(request.httpbinUrl, request.losUrl)
 
         return try {
             // Stage 0: Submit application to LOS and get generated ID
@@ -118,7 +131,7 @@ class LoanApplicationService {
             }
 
             // Return result based on decision
-            when (decision.outcome) {
+            val result = when (decision.outcome) {
                 RiskScore.Outcome.AUTO_APPROVE -> LoanApplicationResult(
                     applicationId = appId,
                     status = "approved",
@@ -138,13 +151,18 @@ class LoanApplicationService {
                     decisionReason = "Manual review required (score ${decision.score})"
                 )
             }
+
+            println("[${Instant.now()}] LoanApplicationWorkflow.run() END - workflowId=$workflowId, status=${result.status}, appId=${result.applicationId}")
+            result
         } catch (e: Exception) {
-            LoanApplicationResult(
+            val errorResult = LoanApplicationResult(
                 applicationId = UUID.randomUUID(),
                 status = "failed",
                 approvedAmount = null,
                 decisionReason = e.message ?: "Unknown error"
             )
+            println("[${Instant.now()}] LoanApplicationWorkflow.run() END (EXCEPTION) - workflowId=$workflowId, error=${e.message}")
+            errorResult
         }
     }
 }

@@ -56,9 +56,10 @@ class LoanApplicationService(
     }
 
     private fun invokeRestateWorkflow(request: LoanApplicationRequest): LoanApplicationResult {
+        val workflowId = UUID.randomUUID().toString()
         val requestBody = json.writeValueAsString(request)
         val httpRequest = Request.Builder()
-            .url("$restateIngressUrl/LoanApplicationService/process")
+            .url("$restateIngressUrl/LoanApplicationService/$workflowId/run")
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
